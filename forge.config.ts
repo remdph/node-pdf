@@ -73,7 +73,25 @@ const config: ForgeConfig = {
     }),
     // Keep the .zip alongside the .dmg for users who want a portable bundle.
     new MakerZIP({}, ['darwin']),
-    new MakerDMG({}, ['darwin']),
+    // Custom DMG layout: dark-header background + curved drag arrow, the
+    // .app on the left and an Applications alias on the right. Positions
+    // line up with the artwork in build/dmg-background.svg.
+    new MakerDMG(
+      {
+        background: './build/dmg-background.png',
+        format: 'ULFO',
+        additionalDMGOptions: {
+          window: {
+            size: { width: 600, height: 400 },
+          },
+        },
+        contents: (opts: { appPath: string }) => [
+          { x: 150, y: 240, type: 'file', path: opts.appPath },
+          { x: 450, y: 240, type: 'link', path: '/Applications' },
+        ],
+      },
+      ['darwin'],
+    ),
     new MakerRpm({}),
     new MakerDeb({}),
   ],

@@ -114,7 +114,7 @@ body,
 .titlebar {
   display: flex;
   align-items: stretch;
-  height: 34px;
+  height: 37px;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   user-select: none;
@@ -131,11 +131,23 @@ body,
   flex-shrink: 0;
 }
 
-.titlebar-logo {
-  height: 8px;
-  width: auto;
+.titlebar-icon {
+  width: 16px;
+  height: 16px;
   display: block;
   pointer-events: none;
+  border-radius: 3px;
+}
+
+/* macOS: empty slot where the native traffic lights are painted. The
+ * 78px width matches their span (3 × 12px dots + spacing) so the tabs
+ * to the right don't slip under them. Kept draggable so the user can
+ * still grab the window between the lights. */
+.titlebar-traffic-light-slot {
+  width: 78px;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+  app-region: drag;
 }
 
 .titlebar-leading {
@@ -148,7 +160,7 @@ body,
   border: 0;
   border-radius: 0;
   padding: 0;
-  color: var(--fg-muted);
+  color: #c8cfdb;
   cursor: pointer;
   transition:
     background-color 0.12s ease,
@@ -173,6 +185,13 @@ body,
 .titlebar-leading-active {
   background: rgba(255, 255, 255, 0.08);
   color: var(--accent);
+}
+
+/* Optical nudge: the home glyph and the about glyph sit a hair higher
+ * than the tab text/window controls when centered, so drop them ~2px. */
+.titlebar-leading > svg,
+.titlebar-btn-about > svg {
+  transform: translateY(2px);
 }
 
 .titlebar-tabs {
@@ -203,7 +222,7 @@ body,
   border: 0;
   border-radius: 0;
   padding: 0;
-  color: var(--fg-muted);
+  color: #c8cfdb;
   cursor: pointer;
   outline: none;
   transition:
@@ -235,7 +254,9 @@ body,
   padding: 0 0.6rem 0 0.55rem;
   width: 200px;
   flex-shrink: 0;
-  background: transparent;
+  /* Inactive tabs sit slightly DARKER than the titlebar so the active
+   * one reads as the foreground without needing an accent underline. */
+  background: rgba(0, 0, 0, 0.22);
   border-right: 1px solid var(--border);
   color: var(--fg-muted);
   cursor: pointer;
@@ -248,29 +269,51 @@ body,
 }
 
 .tab:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(0, 0, 0, 0.12);
   color: var(--fg);
 }
 
-.tab-active {
-  background: var(--bg-elev);
+.tab-active,
+.tab-active:hover {
+  /* Same fill as .pdf-toolbar so the active tab visually connects with
+   * the toolbar directly below it. */
+  background: #1f2533;
   color: var(--fg);
-}
-
-.tab-active::after {
-  content: '';
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 1px;
-  background: var(--accent);
-}
-
-.tab-pdf svg:first-of-type {
-  color: var(--accent);
 }
 
 .tab svg {
   flex-shrink: 0;
+}
+
+/* Star button (only rendered on the active tab — inactive tabs don't
+ * reserve the slot so their title can use the freed width). */
+.tab-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  /* Optical nudge to match the home/about icons in the titlebar. */
+  transform: translateY(3px);
+  transition:
+    color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.tab-star:hover {
+  color: #f7c948;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tab-star-on {
+  color: #f7c948;
 }
 
 .tab-title {
@@ -278,7 +321,7 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   margin-top: 3px;
 }
 
@@ -286,8 +329,8 @@ body,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   background: transparent;
   border: 0;
   border-radius: 3px;
@@ -443,75 +486,632 @@ button.primary:hover {
   color: #fff;
 }
 
-/* --- Picker (no PDF open) ---------------------------------------------- */
-.picker {
+/* --- Home (no PDF open) ------------------------------------------------ */
+
+.home {
   flex: 1;
   display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  padding: 2rem;
+  flex-direction: column;
   min-width: 0;
-  position: relative;
-  /* Same neutral gray as the document viewer so the "where the doc goes"
-   * placeholder reads as a continuation of the viewer surface. */
-  background: #525659;
+  background: var(--bg);
 }
 
-.picker-stack {
+.home-welcome {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2.5rem;
-  width: 100%;
-  max-width: 1100px;
+  gap: 0.55rem;
+  padding: 1.25rem 1.75rem 1.25rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.home-welcome-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  display: block;
+  pointer-events: none;
+}
+
+.home-welcome-text {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.1px;
+}
+
+.home-welcome-link {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  color: #60a5fa;
+  cursor: pointer;
+}
+
+.home-welcome-link:hover {
+  text-decoration: underline;
+  color: #93c5fd;
+}
+
+.home-welcome-link:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.home-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  min-height: 0;
   min-width: 0;
 }
 
+.home-sidebar {
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  padding: 1.5rem 0.75rem;
+  overflow-y: auto;
+}
 
-/* --- Recents carousel -------------------------------------------------- */
-.recents {
-  width: 100%;
-  min-width: 0;
+.home-nav {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 2px;
 }
 
-.recents-heading {
-  margin: 0 0 0 0.25rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+
+.home-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.55rem 0.85rem;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.home-nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.home-nav-item.home-nav-active {
+  background: rgba(255, 255, 255, 0.07);
+  font-weight: 500;
+}
+
+.home-nav-item svg {
+  flex: 0 0 auto;
   color: var(--fg-muted);
 }
 
-.recents-strip {
-  display: flex;
-  gap: 0.85rem;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 0.25rem 0.25rem 0.75rem;
-  scroll-padding-inline: 0.25rem;
+.home-nav-active svg {
+  color: var(--fg);
 }
 
-.recent-item {
-  flex: 0 0 auto;
+.home-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.75rem 2rem 2rem;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* Cards (shared chrome for the tools panel and recents block) */
+.home-card,
+.home-recents-section {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem 1.4rem;
+}
+
+.home-card-header,
+.home-recents-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.home-card-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: 0;
+}
+
+/* --- Tools row ---------------------------------------------------------- */
+
+.home-tools {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.home-tool {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  align-items: flex-start;
+}
+
+.home-tool-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(96, 165, 250, 0.14);
+  color: #93c5fd;
+}
+
+/* Per-tool accent so the row mirrors Adobe's coloured icons */
+.home-tool-stamp .home-tool-icon {
+  background: rgba(244, 114, 182, 0.14);
+  color: #f9a8d4;
+}
+
+.home-tool-print .home-tool-icon {
+  background: rgba(74, 222, 128, 0.14);
+  color: #86efac;
+}
+
+.home-tool-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.home-tool-title {
+  font-size: 0.97rem;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 2px;
+}
+
+.home-tool-desc {
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  line-height: 1.35;
+}
+
+.home-tool-cta {
+  align-self: flex-start;
+  margin-top: 0.55rem;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: #60a5fa;
+  font: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.home-tool-cta:hover {
+  text-decoration: underline;
+}
+
+/* --- Recents section --------------------------------------------------- */
+
+.home-view-toggle {
+  display: inline-flex;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.home-view-btn {
+  background: transparent;
+  border: 0;
+  padding: 0.35rem 0.55rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-view-btn:hover {
+  color: var(--fg);
+}
+
+.home-view-btn.is-active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+}
+
+.home-recents-empty {
+  padding: 2rem 0.5rem;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: 0.92rem;
+}
+
+.home-recents-empty-hint {
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  color: var(--fg-muted);
+}
+
+/* --- Empty Starred state ----------------------------------------------- */
+
+.home-empty-section {
+  min-height: 360px;
+}
+
+.home-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 2rem 1rem;
+  color: var(--fg);
+}
+
+.home-empty-icon {
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 0.5rem;
+}
+
+.home-empty-title {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.home-empty-desc {
+  font-size: 0.9rem;
+  color: var(--fg-muted);
+  margin-bottom: 1rem;
+}
+
+.home-empty-cta {
+  background: #2563eb;
+  color: #fff;
+  border: 0;
+  padding: 0.55rem 1.25rem;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.home-empty-cta:hover {
+  background: #3b82f6;
+}
+
+/* --- Star button on rows / grid items ----------------------------------- */
+
+.home-recents-th-star {
+  width: 32px;
+}
+
+.home-recents-cell-star {
+  width: 32px;
+}
+
+.home-star-btn {
+  background: transparent;
+  border: 0;
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.home-star-btn:hover {
+  opacity: 1;
+  color: #f7c948;
+}
+
+.home-star-btn.is-starred {
+  opacity: 1;
+}
+
+.home-recents-row:hover .home-star-btn {
+  opacity: 1;
+}
+
+.home-grid-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.home-grid-thumb-btn {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.45rem;
-  width: 130px;
+}
+
+.home-grid-star {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 0;
+  padding: 4px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.85);
   cursor: pointer;
-  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+  z-index: 1;
+}
+
+.home-grid-star.is-starred,
+.home-grid-item:hover .home-grid-star,
+.home-grid-item:focus-within .home-grid-star {
+  opacity: 1;
+}
+
+.home-grid-star:hover {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+/* --- Your computer ----------------------------------------------------- */
+
+.home-folders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-folder-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  align-items: center;
+  gap: 0.85rem;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 0.7rem 0.25rem;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.home-folder-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.home-folder-icon {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+}
+
+.home-folder-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.home-folder-name {
+  font-size: 0.96rem;
+  color: var(--fg);
+}
+
+.home-folder-path {
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-browse-btn {
+  align-self: flex-start;
+  margin-top: 1.25rem;
+  background: #2563eb;
+  color: #fff;
+  border: 0;
+  padding: 0.55rem 1.5rem;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.home-browse-btn:hover {
+  background: #3b82f6;
+}
+
+/* List view */
+
+.home-recents-table-wrap {
+  overflow-x: auto;
+}
+
+.home-recents-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.home-recents-table thead th {
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.home-recents-th-opened {
+  width: 32%;
+}
+
+.home-recents-row {
+  cursor: pointer;
   outline: none;
 }
 
-.recent-item:focus-visible .recent-thumb {
-  border-color: var(--accent);
+.home-recents-row > td {
+  padding: 0.55rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: middle;
 }
 
-.recent-thumb {
+.home-recents-row:hover > td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.home-recents-row:focus-visible > td {
+  background: rgba(96, 165, 250, 0.08);
+}
+
+.home-recents-name {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.home-recents-name-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.home-recents-name-title {
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.home-recents-name-format {
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+}
+
+.home-recents-opened {
+  color: var(--fg-muted);
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+/* Row thumbnail (mini PDF preview) */
+
+.home-row-thumb {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 46px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.home-row-thumb canvas,
+.home-row-thumb-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.home-row-thumb-placeholder {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.1),
+    rgba(255, 255, 255, 0.04)
+  );
+  background-size: 200% 100%;
+  animation: home-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes home-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+/* Grid view */
+
+.home-recents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem 0.85rem;
+  padding: 0.25rem 0.1rem;
+}
+
+.home-grid-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.home-grid-thumb {
   width: 130px;
   height: 168px;
   background: #fff;
@@ -528,7 +1128,8 @@ button.primary:hover {
     box-shadow 0.12s ease;
 }
 
-.recent-item:hover .recent-thumb {
+.home-grid-item:hover .home-grid-thumb,
+.home-grid-item:focus-visible .home-grid-thumb {
   border-color: var(--accent);
   transform: translateY(-1px);
   box-shadow:
@@ -536,15 +1137,15 @@ button.primary:hover {
     0 0 0 1px var(--accent);
 }
 
-.recent-thumb canvas,
-.recent-thumb-img {
+.home-grid-thumb canvas,
+.home-grid-thumb-img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.recent-thumb-loading {
+.home-grid-thumb-placeholder {
   width: 100%;
   height: 100%;
   background: linear-gradient(
@@ -554,70 +1155,18 @@ button.primary:hover {
     rgba(255, 255, 255, 0.04)
   );
   background-size: 200% 100%;
-  animation: recents-shimmer 1.4s ease-in-out infinite;
+  animation: home-shimmer 1.4s ease-in-out infinite;
 }
 
-@keyframes recents-shimmer {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: -100% 0;
-  }
-}
-
-.recent-thumb-error {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 107, 107, 0.08);
-  color: var(--danger);
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-.recent-name {
+.home-grid-name {
   font-size: 0.78rem;
   color: var(--fg);
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
+  max-width: 130px;
   line-height: 1.2;
-}
-
-.recent-item-add {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  text-align: inherit;
-}
-
-.recent-thumb-add {
-  background: transparent;
-  border: 1.5px dashed var(--border);
-  box-shadow: none;
-  color: var(--fg-muted);
-}
-
-.recent-thumb-add svg {
-  width: 50%;
-  height: 50%;
-}
-
-.recent-item-add:hover .recent-thumb-add {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: var(--accent);
-  border-style: dashed;
-  color: var(--accent);
-  transform: translateY(-1px);
-  box-shadow: none;
 }
 
 /* --- Password dialog (modal, used for both set + unlock) ------------- */
@@ -1105,7 +1654,7 @@ button.primary:hover {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  height: 36px;
+  height: 41px;
   padding: 0 0.4rem;
   /* A touch lighter than the titlebar (--bg-elev #161a22) so the toolbar
    * reads as a separate band rather than blending into the chrome. */
@@ -1142,13 +1691,23 @@ button.primary:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 28px;
+  width: 34px;
+  height: 33px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 5px;
   padding: 0;
-  color: var(--fg-muted);
+  /* Brighter than --fg-muted (#8b95a8) but not pure white — keeps the
+   * toolbar legible without screaming. */
+  color: #c8cfdb;
+}
+
+/* Scale every glyph up proportionally to the taller toolbar so the
+ * inline width/height attrs (which range from 14 to 16) don't make the
+ * buttons look empty. */
+.pdf-tool svg {
+  width: 19px;
+  height: 19px;
   cursor: pointer;
   transition:
     background-color 0.12s ease,

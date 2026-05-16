@@ -3,6 +3,7 @@ import { app, BrowserWindow, Menu } from 'electron';
 import { createMainWindow } from './windows.js';
 import { registerAllIpc } from './ipc/index.js';
 import { addPendingFile, deliverFileToRenderer } from './ipc/pdf.js';
+import { buildApplicationMenu } from './menu.js';
 import { registerStampProtocol, registerStampScheme } from './stamps/protocol.js';
 
 // Windows installer entry; resolves before app is "ready" when Squirrel kicks in.
@@ -82,7 +83,7 @@ if (process.platform === 'linux') {
 }
 
 app.whenReady().then(() => {
-  Menu.setApplicationMenu(null);
+  Menu.setApplicationMenu(buildApplicationMenu());
   registerStampProtocol();
   registerAllIpc();
   createMainWindow();

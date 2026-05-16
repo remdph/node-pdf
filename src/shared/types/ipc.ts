@@ -35,7 +35,16 @@ export interface ProtectInput {
   permissions?: PdfPermissions;
 }
 
+export interface HomeFolder {
+  /** Display label (e.g. "Downloads"). */
+  name: string;
+  /** Absolute path to the folder on disk. */
+  path: string;
+}
+
 export interface IpcApi {
+  /** Host OS identifier — same shape as Node's `process.platform`. */
+  platform: NodeJS.Platform;
   window: {
     minimize(): Promise<void>;
     maximizeToggle(): Promise<boolean>;
@@ -47,7 +56,9 @@ export interface IpcApi {
     version(): Promise<string>;
   };
   pdf: {
-    open(): Promise<string | null>;
+    /** Show the system "Open PDF" dialog. Pass `defaultPath` to root the
+     * dialog at a specific folder (e.g. the user's Downloads). */
+    open(defaultPath?: string): Promise<string | null>;
     read(filePath: string): Promise<Uint8Array>;
     /** Drain any PDF paths the OS shell handed us before the renderer was
      * ready (cold start launched via "Open with NodePDF"). */
@@ -77,6 +88,10 @@ export interface IpcApi {
   recents: {
     readThumb(filePath: string): Promise<Uint8Array | null>;
     saveThumb(input: { filePath: string; bytes: Uint8Array }): Promise<void>;
+  };
+  shell: {
+    /** List of common home subdirectories that exist on this machine. */
+    homeFolders(): Promise<HomeFolder[]>;
   };
 }
 
@@ -111,5 +126,8 @@ export const IPC_CHANNELS = {
   },
   printer: {
     list: 'printer:list',
+  },
+  shell: {
+    homeFolders: 'shell:home-folders',
   },
 } as const;

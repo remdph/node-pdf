@@ -2,11 +2,16 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { useTabsStore, type PdfTab } from '../stores/tabs.js';
 import { ipc } from '../lib/ipc.js';
-import logoUrl from '../assets/logo.png';
+import iconUrl from '../assets/icon.png';
 import { AboutDialog } from './AboutDialog.js';
 
 const TAB_FIXED_WIDTH = 200;
 const OVERFLOW_BTN_WIDTH = 30;
+
+// macOS draws native traffic lights over our titlebar; render an empty
+// drag-reserved spacer of the same width where the brand icon would sit
+// on Win/Linux so tabs don't slip under them.
+const isMac = ipc?.platform === 'darwin';
 
 export function TitleBar(): JSX.Element {
   const tabs = useTabsStore((s) => s.tabs);
@@ -15,6 +20,8 @@ export function TitleBar(): JSX.Element {
   const activate = useTabsStore((s) => s.activate);
   const close = useTabsStore((s) => s.close);
   const setView = useTabsStore((s) => s.setView);
+  const starred = useTabsStore((s) => s.starred);
+  const toggleStarred = useTabsStore((s) => s.toggleStarred);
 
   const [maximized, setMaximized] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -75,9 +82,13 @@ export function TitleBar(): JSX.Element {
 
   return (
     <div className="titlebar">
-      <div className="titlebar-brand">
-        <img src={logoUrl} alt="NodePDF" className="titlebar-logo" draggable={false} />
-      </div>
+      {isMac ? (
+        <div className="titlebar-traffic-light-slot" aria-hidden />
+      ) : (
+        <div className="titlebar-brand">
+          <img src={iconUrl} alt="NodePDF" className="titlebar-icon" draggable={false} />
+        </div>
+      )}
 
       <button
         type="button"
@@ -87,7 +98,7 @@ export function TitleBar(): JSX.Element {
         onClick={() => setView('picker')}
         title="Home"
       >
-        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden>
+        <svg width="17" height="17" viewBox="0 0 14 14" fill="none" aria-hidden>
           <path
             d="M2 6.5 L7 2 L12 6.5 V12 a0.6 0.6 0 0 1 -0.6 0.6 H8.5 V9 H5.5 V12.6 H2.6 A0.6 0.6 0 0 1 2 12 Z"
             stroke="currentColor"
@@ -104,8 +115,10 @@ export function TitleBar(): JSX.Element {
             key={tab.id}
             tab={tab}
             active={view === 'tab' && tab.id === activeId}
+            starred={starred.includes(tab.filePath)}
             onActivate={() => activate(tab.id)}
             onClose={() => close(tab.id)}
+            onToggleStar={() => toggleStarred(tab.filePath)}
           />
         ))}
         {hiddenTabs.length > 0 && (
@@ -120,12 +133,12 @@ export function TitleBar(): JSX.Element {
       <div className="titlebar-controls">
         <button
           type="button"
-          className="titlebar-btn"
+          className="titlebar-btn titlebar-btn-about"
           aria-label="About NodePDF"
           title="About"
           onClick={() => setAboutOpen(true)}
         >
-          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden>
+          <svg width="17" height="17" viewBox="0 0 14 14" fill="none" aria-hidden>
             <circle cx="7" cy="7" r="5.6" stroke="currentColor" strokeWidth="1.2" />
             <path
               d="M5.4 5.4 a1.6 1.6 0 1 1 2.6 1.3 c-0.6 0.45 -1 0.7 -1 1.4"
@@ -137,38 +150,42 @@ export function TitleBar(): JSX.Element {
             <circle cx="7" cy="10.2" r="0.7" fill="currentColor" />
           </svg>
         </button>
-        <button type="button" className="titlebar-btn" aria-label="Minimize" onClick={onMinimize}>
-          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-            <rect x="1" y="4.5" width="8" height="1" fill="currentColor" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          className="titlebar-btn"
-          aria-label={maximized ? 'Restore' : 'Maximize'}
-          onClick={onMaximize}
-        >
-          {maximized ? (
-            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-              <rect x="1.5" y="2.5" width="6" height="6" fill="none" stroke="currentColor" />
-              <rect x="3" y="1" width="6" height="6" fill="none" stroke="currentColor" />
-            </svg>
-          ) : (
-            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-              <rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" />
-            </svg>
-          )}
-        </button>
-        <button
-          type="button"
-          className="titlebar-btn titlebar-btn-close"
-          aria-label="Close"
-          onClick={onClose}
-        >
-          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-            <path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" strokeWidth="1.1" fill="none" />
-          </svg>
-        </button>
+        {!isMac && (
+          <>
+            <button type="button" className="titlebar-btn" aria-label="Minimize" onClick={onMinimize}>
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+                <rect x="1" y="4.5" width="8" height="1" fill="currentColor" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="titlebar-btn"
+              aria-label={maximized ? 'Restore' : 'Maximize'}
+              onClick={onMaximize}
+            >
+              {maximized ? (
+                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+                  <rect x="1.5" y="2.5" width="6" height="6" fill="none" stroke="currentColor" />
+                  <rect x="3" y="1" width="6" height="6" fill="none" stroke="currentColor" />
+                </svg>
+              ) : (
+                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+                  <rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              className="titlebar-btn titlebar-btn-close"
+              aria-label="Close"
+              onClick={onClose}
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+                <path d="M1,1 L9,9 M9,1 L1,9" stroke="currentColor" strokeWidth="1.1" fill="none" />
+              </svg>
+            </button>
+          </>
+        )}
       </div>
 
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
@@ -179,13 +196,17 @@ export function TitleBar(): JSX.Element {
 function TabItem({
   tab,
   active,
+  starred,
   onActivate,
   onClose,
+  onToggleStar,
 }: {
   tab: PdfTab;
   active: boolean;
+  starred: boolean;
   onActivate: () => void;
   onClose: () => void;
+  onToggleStar: () => void;
 }): JSX.Element {
   return (
     <div
@@ -200,7 +221,21 @@ function TabItem({
       role="button"
       tabIndex={0}
     >
-      <PdfIcon />
+      {active && (
+        <button
+          type="button"
+          className={`tab-star${starred ? ' tab-star-on' : ''}`}
+          aria-label={starred ? `Unstar ${tab.title}` : `Star ${tab.title}`}
+          aria-pressed={starred}
+          title={starred ? 'Unstar' : 'Star'}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleStar();
+          }}
+        >
+          <StarIcon filled={starred} />
+        </button>
+      )}
       <span className="tab-title" title={tab.filePath}>
         {tab.title}
       </span>
@@ -218,6 +253,20 @@ function TabItem({
         </svg>
       </button>
     </div>
+  );
+}
+
+function StarIcon({ filled }: { filled: boolean }): JSX.Element {
+  return (
+    <svg width="17" height="17" viewBox="0 0 16 16" aria-hidden>
+      <path
+        d="M8 1.8l1.95 3.92 4.32.63-3.12 3.04.74 4.3L8 11.66 4.11 13.69l.74-4.3L1.73 6.35l4.32-.63z"
+        fill={filled ? '#f7c948' : 'none'}
+        stroke={filled ? '#f7c948' : 'currentColor'}
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

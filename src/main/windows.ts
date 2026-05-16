@@ -16,6 +16,12 @@ declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
 export function createMainWindow(): BrowserWindow {
+  const isMac = process.platform === 'darwin';
+  // On macOS we keep a frameless window but use `titleBarStyle: 'hidden'`
+  // so the native traffic-light controls (close/min/zoom) still render
+  // over our custom titlebar, positioned to land where the icon used to
+  // sit. On Windows/Linux we keep the fully custom titlebar with our own
+  // min/max/close buttons.
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -25,7 +31,12 @@ export function createMainWindow(): BrowserWindow {
     show: false,
     title: 'NodePDF',
     icon: appIconPath(),
-    frame: false,
+    ...(isMac
+      ? {
+          titleBarStyle: 'hidden' as const,
+          trafficLightPosition: { x: 12, y: 12 },
+        }
+      : { frame: false }),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

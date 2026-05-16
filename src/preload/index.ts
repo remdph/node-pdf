@@ -2,7 +2,12 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
 
 import { IPC_CHANNELS } from '~shared/types/ipc.js';
-import type { PrinterInfo, PrintOptions, ProtectInput } from '~shared/types/ipc.js';
+import type {
+  HomeFolder,
+  PrinterInfo,
+  PrintOptions,
+  ProtectInput,
+} from '~shared/types/ipc.js';
 import type { ApplyStampInput, ApplyStampResult, Stamp } from '~shared/types/stamps.js';
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -17,6 +22,9 @@ function subscribe<T>(channel: string, handler: (payload: T) => void): () => voi
 }
 
 const api = {
+  /** Static OS identifier ("darwin" | "win32" | "linux" | …). Saves the
+   * renderer a round-trip when toggling platform-specific chrome. */
+  platform: process.platform,
   window: {
     minimize: () => invoke<void>(IPC_CHANNELS.window.minimize),
     maximizeToggle: () => invoke<boolean>(IPC_CHANNELS.window.maximizeToggle),
@@ -29,7 +37,8 @@ const api = {
     version: () => invoke<string>(IPC_CHANNELS.app.version),
   },
   pdf: {
-    open: () => invoke<string | null>(IPC_CHANNELS.pdf.open),
+    open: (defaultPath?: string) =>
+      invoke<string | null>(IPC_CHANNELS.pdf.open, defaultPath),
     read: (filePath: string) => invoke<Uint8Array>(IPC_CHANNELS.pdf.read, filePath),
     flushPending: () => invoke<string[]>(IPC_CHANNELS.pdf.flushPending),
     onOpenExternal: (handler: (filePath: string) => void) =>
@@ -54,6 +63,9 @@ const api = {
       invoke<Uint8Array | null>(IPC_CHANNELS.recents.readThumb, filePath),
     saveThumb: (input: { filePath: string; bytes: Uint8Array }) =>
       invoke<void>(IPC_CHANNELS.recents.saveThumb, input),
+  },
+  shell: {
+    homeFolders: () => invoke<HomeFolder[]>(IPC_CHANNELS.shell.homeFolders),
   },
 };
 

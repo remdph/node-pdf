@@ -26,6 +26,9 @@ interface TabsState {
   view: View;
   sidePanel: SidePanelMode;
   recents: RecentDoc[];
+  /** File paths the user has starred from the home view. Lookup is O(n)
+   * but the list is tiny so it doesn't matter. */
+  starred: string[];
   setView(view: View): void;
   close(id: string): void;
   activate(id: string): void;
@@ -38,6 +41,7 @@ interface TabsState {
   toggleSidePanel(mode: Exclude<SidePanelMode, null>): void;
   addRecent(input: { filePath: string; title?: string }): void;
   removeRecent(filePath: string): void;
+  toggleStarred(filePath: string): void;
 }
 
 const RECENTS_MAX = 10;
@@ -57,6 +61,7 @@ export const useTabsStore = create<TabsState>()(
       view: 'picker',
       sidePanel: null,
       recents: [],
+      starred: [],
 
       setView: (view) => set({ view }),
 
@@ -124,7 +129,19 @@ export const useTabsStore = create<TabsState>()(
       },
 
       removeRecent: (filePath) =>
-        set((s) => ({ recents: s.recents.filter((r) => r.filePath !== filePath) })),
+        set((s) => ({
+          recents: s.recents.filter((r) => r.filePath !== filePath),
+          // Remove the starred mark too so we never end up with a dangling
+          // path that the user can't unstar.
+          starred: s.starred.filter((p) => p !== filePath),
+        })),
+
+      toggleStarred: (filePath) =>
+        set((s) => ({
+          starred: s.starred.includes(filePath)
+            ? s.starred.filter((p) => p !== filePath)
+            : [...s.starred, filePath],
+        })),
     }),
     {
       name: 'node-pdf:tabs',
@@ -135,19 +152,24 @@ export const useTabsStore = create<TabsState>()(
         view: state.view,
         sidePanel: state.sidePanel,
         recents: state.recents,
+        starred: state.starred,
       }),
-      version: 4,
+      version: 5,
       migrate: (persisted, version) => {
         if (!persisted || typeof persisted !== 'object') return persisted;
+        let next = persisted as Record<string, unknown>;
         // v3 → v4: thumbsOpen boolean → sidePanel discriminated mode.
         if (version < 4) {
-          const old = persisted as { thumbsOpen?: boolean };
+          const old = next as { thumbsOpen?: boolean };
           const sidePanel: SidePanelMode = old.thumbsOpen ? 'thumbs' : null;
-          const next = { ...old, sidePanel };
+          next = { ...next, sidePanel };
           delete (next as { thumbsOpen?: boolean }).thumbsOpen;
-          return next;
         }
-        return persisted;
+        // v4 → v5: introduces `starred` list.
+        if (version < 5) {
+          next = { ...next, starred: [] };
+        }
+        return next;
       },
     },
   ),

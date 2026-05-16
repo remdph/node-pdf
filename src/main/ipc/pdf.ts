@@ -67,19 +67,20 @@ export function registerPdfIpc(): void {
     return drained;
   });
 
-  handle<[], string | null>(IPC_CHANNELS.pdf.open, async (event) => {
+  handle<[string | undefined], string | null>(IPC_CHANNELS.pdf.open, async (event, defaultPath) => {
     const win = BrowserWindow.fromWebContents(event.sender);
+    // `defaultPath` lets callers (e.g. the home view's "Your computer" pane)
+    // root the dialog at a specific folder. Without it, the OS picks
+    // whichever directory it last remembered.
+    const opts = {
+      title: 'Open PDF',
+      properties: ['openFile' as const],
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      ...(defaultPath ? { defaultPath } : {}),
+    };
     const result = win
-      ? await dialog.showOpenDialog(win, {
-          title: 'Open PDF',
-          properties: ['openFile'],
-          filters: [{ name: 'PDF', extensions: ['pdf'] }],
-        })
-      : await dialog.showOpenDialog({
-          title: 'Open PDF',
-          properties: ['openFile'],
-          filters: [{ name: 'PDF', extensions: ['pdf'] }],
-        });
+      ? await dialog.showOpenDialog(win, opts)
+      : await dialog.showOpenDialog(opts);
 
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0] ?? null;
