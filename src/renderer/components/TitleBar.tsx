@@ -34,6 +34,14 @@ export function TitleBar(): JSX.Element {
     return ipc.window.onMaximizeChange(setMaximized);
   }, []);
 
+  // The macOS app menu's "About NodePDF" item routes here so the user
+  // sees the same rich React dialog (with clickable links) as the
+  // titlebar's about button.
+  useEffect(() => {
+    if (!ipc?.app?.onShowAbout) return;
+    return ipc.app.onShowAbout(() => setAboutOpen(true));
+  }, []);
+
   useLayoutEffect(() => {
     const el = tabsContainerRef.current;
     if (!el) return;

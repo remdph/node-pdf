@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu } from 'electron';
 
 import { createMainWindow } from './windows.js';
+import { registerFileAssociations } from './file-association.js';
 import { registerAllIpc } from './ipc/index.js';
 import { addPendingFile, deliverFileToRenderer } from './ipc/pdf.js';
 import { buildApplicationMenu } from './menu.js';
@@ -31,14 +32,20 @@ function findPdfInArgv(argv: readonly string[]): string | null {
   return null;
 }
 
-// macOS dispatches this for double-click + "Open with" from Finder, and it
-// can fire BEFORE app.whenReady() resolves. We always buffer the path; the
-// renderer drains the buffer on mount.
-app.on('open-file', (event, filePath) => {
-  event.preventDefault();
-  if (!deliverFileToRenderer(filePath)) {
-    addPendingFile(filePath);
-  }
+// macOS dispatches `open-file` for double-click + "Open with" from Finder,
+// and it can fire BEFORE app.whenReady() resolves. Apple's documented
+// pattern is to register inside `will-finish-launching` (the Electron
+// translation of NSApplication's `applicationWillFinishLaunching`) which
+// eliminates a small race window between module load and the first
+// Apple Event. We always buffer the path; the renderer drains the
+// buffer on mount.
+app.on('will-finish-launching', () => {
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault();
+    if (!deliverFileToRenderer(filePath)) {
+      addPendingFile(filePath);
+    }
+  });
 });
 
 // Windows / Linux second-instance: argv from the new process contains the
@@ -86,6 +93,9 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(buildApplicationMenu());
   registerStampProtocol();
   registerAllIpc();
+  // Best-effort PDF handler registration on Win/Linux (macOS handles
+  // this declaratively via Info.plist).
+  registerFileAssociations();
   createMainWindow();
 
   app.on('activate', () => {

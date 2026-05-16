@@ -54,6 +54,10 @@ export interface IpcApi {
   };
   app: {
     version(): Promise<string>;
+    /** Push fired by the macOS app menu's "About NodePDF" item so the
+     * renderer can open the in-app About dialog (clickable links etc.)
+     * instead of the plain-text native panel. */
+    onShowAbout(handler: () => void): () => void;
   };
   pdf: {
     /** Show the system "Open PDF" dialog. Pass `defaultPath` to root the
@@ -105,6 +109,7 @@ export const IPC_CHANNELS = {
   },
   app: {
     version: 'app:version',
+    showAbout: 'app:show-about',
   },
   pdf: {
     open: 'pdf:open',

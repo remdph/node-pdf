@@ -21,19 +21,46 @@ const config: ForgeConfig = {
     executableName: 'node-pdf',
     // forge resolves per-platform extensions: icon.ico / icon.icns / icon.png
     icon: './icon',
-    // Make the icon available at runtime via process.resourcesPath.
-    extraResource: ['./icon.png'],
-    // Register NodePDF as a PDF handler with macOS Launch Services so it
-    // appears in Finder's "Open With" menu (and can be set as the default
-    // PDF app). `LSHandlerRank: Alternate` keeps Preview as the default
-    // unless the user picks NodePDF.
+    // Resources we need at runtime: the app icon (for the BrowserWindow
+    // icon hint on Win/Linux) and the per-file PDF document icon (looked
+    // up by Finder/Explorer via CFBundleTypeIconFile / the Windows
+    // registry hook on first run).
+    extraResource: [
+      './icon.png',
+      './build/pdf-document.icns',
+      './build/pdf-document.ico',
+    ],
+    // macOS Launch Services registration. `LSHandlerRank: 'Owner'` claims
+    // ownership of com.adobe.pdf — the most aggressive rank short of
+    // forcing default. macOS still won't make us the default automatically
+    // (Apple disallows that), but with 'Owner' the "Always Open With"
+    // override actually works (the previous 'Alternate' rank caused
+    // Launch Services to fall back to Preview, which then surfaced a
+    // "PDF damaged" error on the file). `CFBundleTypeRole: 'Viewer'` is
+    // honest about what we are: we don't implement NSDocument editing.
+    // `CFBundleTypeIconFile` + `UTImportedTypeDeclarations` give the
+    // custom red-document icon Finder paints on .pdf files associated
+    // with this app.
     extendInfo: {
       CFBundleDocumentTypes: [
         {
           CFBundleTypeName: 'PDF Document',
-          CFBundleTypeRole: 'Editor',
-          LSHandlerRank: 'Alternate',
+          CFBundleTypeRole: 'Viewer',
+          LSHandlerRank: 'Owner',
           LSItemContentTypes: ['com.adobe.pdf'],
+          CFBundleTypeIconFile: 'pdf-document.icns',
+        },
+      ],
+      UTImportedTypeDeclarations: [
+        {
+          UTTypeIdentifier: 'com.adobe.pdf',
+          UTTypeConformsTo: ['public.data', 'public.content'],
+          UTTypeDescription: 'PDF Document',
+          UTTypeIconFile: 'pdf-document.icns',
+          UTTypeTagSpecification: {
+            'public.filename-extension': ['pdf'],
+            'public.mime-type': ['application/pdf'],
+          },
         },
       ],
     },
@@ -92,8 +119,22 @@ const config: ForgeConfig = {
       },
       ['darwin'],
     ),
-    new MakerRpm({}),
-    new MakerDeb({}),
+    // Linux: register application/pdf in the generated .desktop file so
+    // NodePDF shows up in Nautilus/Dolphin/Files "Open With" for PDFs.
+    // Setting NodePDF as the *default* PDF viewer is handled at first
+    // launch via xdg-mime (per-user), not in a postinst script.
+    new MakerRpm({
+      options: {
+        mimeType: ['application/pdf'],
+        categories: ['Office'],
+      },
+    }),
+    new MakerDeb({
+      options: {
+        mimeType: ['application/pdf'],
+        categories: ['Office'],
+      },
+    }),
   ],
   plugins: [
     new AutoUnpackNativesPlugin({}),

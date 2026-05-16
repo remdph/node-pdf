@@ -6,6 +6,7 @@ import {
   type MenuItemConstructorOptions,
 } from 'electron';
 
+import { IPC_CHANNELS } from '~shared/types/ipc.js';
 import { addPendingFile, deliverFileToRenderer } from './ipc/pdf.js';
 
 /** Builds the macOS-style app menu (also shown on Win/Linux when the user
@@ -37,7 +38,17 @@ export function buildApplicationMenu(): Menu {
           {
             label: app.name,
             submenu: [
-              { role: 'about' as const },
+              {
+                // Routes to the same React AboutDialog as the in-app
+                // about button so the user gets clickable links/styled
+                // copy instead of the native plain-text panel.
+                label: `About ${app.name}`,
+                click: () => {
+                  const win =
+                    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+                  win?.webContents.send(IPC_CHANNELS.app.showAbout);
+                },
+              },
               { type: 'separator' as const },
               { role: 'hide' as const },
               { role: 'hideOthers' as const },

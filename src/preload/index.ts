@@ -35,6 +35,8 @@ const api = {
   },
   app: {
     version: () => invoke<string>(IPC_CHANNELS.app.version),
+    onShowAbout: (handler: () => void) =>
+      subscribe<void>(IPC_CHANNELS.app.showAbout, () => handler()),
   },
   pdf: {
     open: (defaultPath?: string) =>
