@@ -167,15 +167,50 @@ jobs:
           sed -i "s/^sha256sums=.*/sha256sums=('${{ steps.deb.outputs.sha }}')/" aur/PKGBUILD
           cat aur/PKGBUILD
 
+      # The KSXGitHub deploy-aur action (both v2.7.2 and v3.0.1) crashes
+      # inside its container with `bash: --command: invalid option`, so we
+      # do the AUR push by hand. The flow is: regen .SRCINFO inside an
+      # archlinux container (only place we have makepkg), clone the AUR
+      # repo over SSH, copy PKGBUILD + .SRCINFO, commit, push.
       - name: Publish to AUR
-        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
-        with:
-          pkgname: nodepdf-bin
-          pkgbuild: aur/PKGBUILD
-          commit_username: Rafael Maldonado
-          commit_email: remdph@gmail.com
-          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "upgpkg: nodepdf-bin ${{ steps.ver.outputs.version }}-1"
-          ssh_keyscan_types: rsa,ecdsa,ed25519
-          allow_empty_commits: false
-          force_push: false
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # 1. SSH setup
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur_key
+          chmod 600 ~/.ssh/aur_key
+          ssh-keyscan -t ed25519,rsa,ecdsa aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<EOF
+          Host aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+          EOF
+          chmod 600 ~/.ssh/config
+
+          # 2. Regenerate .SRCINFO inside an archlinux container — makepkg
+          #    refuses to run as root, so we create a builder user.
+          docker run --rm -v "$PWD/aur:/work" -w /work archlinux:latest bash -c '
+            useradd -m -d /home/builder builder
+            chown -R builder:builder /work
+            su builder -c "makepkg --printsrcinfo > .SRCINFO"
+          '
+
+          # 3. Clone AUR repo, copy updated files, commit, push
+          git clone ssh://aur@aur.archlinux.org/nodepdf-bin.git /tmp/aur-checkout
+          cp aur/PKGBUILD aur/.SRCINFO /tmp/aur-checkout/
+          cd /tmp/aur-checkout
+          git config user.email 'remdph@gmail.com'
+          git config user.name 'Rafael Maldonado'
+          git add PKGBUILD .SRCINFO
+          if git diff --staged --quiet; then
+            echo 'No AUR-side changes vs the published version — skipping push.'
+            exit 0
+          fi
+          git commit -m "upgpkg: nodepdf-bin ${VERSION}-1"
+          git push origin master
