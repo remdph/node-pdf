@@ -23,6 +23,20 @@ const config: ForgeConfig = {
     icon: './icon',
     // Make the icon available at runtime via process.resourcesPath.
     extraResource: ['./icon.png'],
+    // Register NodePDF as a PDF handler with macOS Launch Services so it
+    // appears in Finder's "Open With" menu (and can be set as the default
+    // PDF app). `LSHandlerRank: Alternate` keeps Preview as the default
+    // unless the user picks NodePDF.
+    extendInfo: {
+      CFBundleDocumentTypes: [
+        {
+          CFBundleTypeName: 'PDF Document',
+          CFBundleTypeRole: 'Editor',
+          LSHandlerRank: 'Alternate',
+          LSItemContentTypes: ['com.adobe.pdf'],
+        },
+      ],
+    },
     // macOS code signing with a Developer ID Application certificate.
     // Falls back to ad-hoc signing when APPLE_SIGNING_IDENTITY is unset
     // (e.g. forks/CI without secrets) so the build doesn't fail outright.

@@ -15,6 +15,24 @@ import type { ApplyStampInput, ApplyStampResult } from '~shared/types/stamps.js'
 import { findStamp } from '../stamps/storage.js';
 import { handle } from './register.js';
 
+// Files received from the OS shell before a renderer is ready to receive
+// them (cold start with "Open with NodePDF", or 'open-file' firing before
+// app.ready on macOS). The renderer drains this list on mount.
+const pendingFiles: string[] = [];
+
+export function addPendingFile(filePath: string): void {
+  pendingFiles.push(filePath);
+}
+
+/** Push a file path to the first ready renderer. Returns false if no
+ * renderer is ready yet so the caller knows to buffer it instead. */
+export function deliverFileToRenderer(filePath: string): boolean {
+  const [win] = BrowserWindow.getAllWindows();
+  if (!win || win.webContents.isLoading()) return false;
+  win.webContents.send(IPC_CHANNELS.pdf.openExternal, filePath);
+  return true;
+}
+
 /** Map our user-friendly permission flags to the shape pdf-lib's `encrypt`
  * expects. We grant the unspecified-but-related capabilities by default
  * (e.g. content accessibility is always on so screen readers work). */
@@ -42,6 +60,13 @@ interface PdfDocumentLike {
 const PDF_MAGIC = Buffer.from('%PDF-', 'ascii');
 
 export function registerPdfIpc(): void {
+  // Renderer calls this on mount to grab any paths queued before it was
+  // ready (cold start launched via "Open with NodePDF"). Drains and clears.
+  handle<[], string[]>(IPC_CHANNELS.pdf.flushPending, async () => {
+    const drained = pendingFiles.splice(0, pendingFiles.length);
+    return drained;
+  });
+
   handle<[], string | null>(IPC_CHANNELS.pdf.open, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     const result = win

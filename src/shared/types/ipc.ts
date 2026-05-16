@@ -49,6 +49,12 @@ export interface IpcApi {
   pdf: {
     open(): Promise<string | null>;
     read(filePath: string): Promise<Uint8Array>;
+    /** Drain any PDF paths the OS shell handed us before the renderer was
+     * ready (cold start launched via "Open with NodePDF"). */
+    flushPending(): Promise<string[]>;
+    /** Live push from main: file path received via 'open-file' (macOS) or
+     * a second-instance launch (Windows/Linux) while the app is running. */
+    onOpenExternal(handler: (filePath: string) => void): () => void;
     applyStamp(input: ApplyStampInput): Promise<ApplyStampResult>;
     print(filePath: string, options?: PrintOptions): Promise<void>;
     /** Manage PDF password protection. Behaviour depends on inputs:
@@ -88,6 +94,8 @@ export const IPC_CHANNELS = {
   pdf: {
     open: 'pdf:open',
     read: 'pdf:read',
+    flushPending: 'pdf:flush-pending',
+    openExternal: 'pdf:open-external',
     applyStamp: 'pdf:apply-stamp',
     print: 'pdf:print',
     protect: 'pdf:protect',
