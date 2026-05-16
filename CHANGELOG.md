@@ -5,6 +5,14 @@ All notable changes to NodePDF will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-05-15
+
+### Fixed
+- macOS: bundle proper entitlements with the ad-hoc signature so the V8
+  JIT and the Electron helpers can load. Without `cs.allow-jit` and
+  `cs.disable-library-validation` the app crashed on first launch
+  immediately after dyld finished loading.
+
 ## [0.1.1] — 2026-05-15
 
 ### Fixed
@@ -59,5 +67,6 @@ Initial public release.
 - Windows: Squirrel `.exe` installer.
 - macOS: `.dmg` disk image and `.zip` portable bundle.
 
+[0.1.2]: https://github.com/remdph/node-pdf/releases/tag/v0.1.2
 [0.1.1]: https://github.com/remdph/node-pdf/releases/tag/v0.1.1
 [0.1.0]: https://github.com/remdph/node-pdf/releases/tag/v0.1.0

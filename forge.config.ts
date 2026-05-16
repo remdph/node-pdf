@@ -23,12 +23,15 @@ const config: ForgeConfig = {
     extraResource: ['./icon.png'],
     // Ad-hoc signing for macOS — no Apple Developer account required, but
     // satisfies the Apple Silicon hard requirement that every binary be
-    // at least signed ad-hoc. Without this, downloaded .app bundles get
-    // flagged as "damaged" and refuse to launch.
+    // at least signed ad-hoc. The entitlements file unlocks the V8 JIT
+    // and disables library validation so the bundled helpers/frameworks
+    // can load without an Apple Developer signature.
     osxSign: {
       identity: '-',
       optionsForFile: () => ({
-        hardenedRuntime: false,
+        hardenedRuntime: true,
+        entitlements: './build/entitlements.mac.plist',
+        'entitlements-inherit': './build/entitlements.mac.plist',
       }),
     },
   },
