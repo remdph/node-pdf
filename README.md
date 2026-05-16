@@ -86,7 +86,20 @@
 
 ---
 
-## Quick start
+## Install
+
+Grab the right artifact for your OS from the [latest release](https://github.com/remdph/node-pdf/releases/latest):
+
+| OS | Package |
+| --- | --- |
+| Windows | `NodePDF-*.Setup.exe` |
+| macOS (Apple Silicon) | `NodePDF-*.dmg` |
+| Debian / Ubuntu / Mint | `node-pdf_*_amd64.deb` |
+| Fedora / openSUSE | `node-pdf-*.x86_64.rpm` |
+| **Arch Linux** | `yay -S nodepdf-bin` (from the AUR) |
+| Any Linux | `NodePDF-*-x86_64.AppImage` (chmod +x and run) |
+
+## Quick start (development)
 
 NodePDF requires **Node 22** (a `mise.toml` is included for [mise](https://mise.jdx.dev/) / asdf users) and **pnpm**.
 

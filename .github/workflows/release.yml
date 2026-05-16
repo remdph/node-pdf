@@ -88,6 +88,7 @@ jobs:
           path: |
             out/make/**/*.deb
             out/make/**/*.rpm
+            out/make/**/*.AppImage
             out/make/**/*.exe
             out/make/**/*.nupkg
             out/make/**/*.zip
@@ -113,9 +114,9 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f \
-            \( -name '*.deb' -o -name '*.rpm' -o -name '*.exe' \
-               -o -name '*.nupkg' -o -name '*.zip' -o -name '*.dmg' \
-               -o -name 'RELEASES' \) \
+            \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
+               -o -name '*.exe' -o -name '*.nupkg' -o -name '*.zip' \
+               -o -name '*.dmg' -o -name 'RELEASES' \) \
             -exec cp -v {} release/ \;
           ls -la release/
 
@@ -126,3 +127,55 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+
+  publish-aur:
+    name: Publish nodepdf-bin to AUR
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      # Wait for the .deb asset to be reachable. softprops/action-gh-release
+      # uploads sequentially and AWS occasionally lags a few seconds before
+      # the public URL serves the bytes.
+      - name: Fetch the freshly-released .deb (with retry)
+        id: deb
+        run: |
+          URL="https://github.com/${{ github.repository }}/releases/download/v${{ steps.ver.outputs.version }}/node-pdf_${{ steps.ver.outputs.version }}_amd64.deb"
+          for i in 1 2 3 4 5; do
+            if curl -fsSL -o /tmp/pkg.deb "$URL"; then
+              break
+            fi
+            echo "attempt $i failed, sleeping 10s"
+            sleep 10
+          done
+          SHA=$(sha256sum /tmp/pkg.deb | awk '{print $1}')
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Computed sha256: $SHA"
+
+      - name: Update PKGBUILD with new version + sha256
+        run: |
+          sed -i "s/^pkgver=.*/pkgver=${{ steps.ver.outputs.version }}/" aur/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" aur/PKGBUILD
+          sed -i "s/^sha256sums=.*/sha256sums=('${{ steps.deb.outputs.sha }}')/" aur/PKGBUILD
+          cat aur/PKGBUILD
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: nodepdf-bin
+          pkgbuild: aur/PKGBUILD
+          commit_username: Rafael Maldonado
+          commit_email: remdph@gmail.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "upgpkg: nodepdf-bin ${{ steps.ver.outputs.version }}-1"
+          ssh_keyscan_types: rsa,ecdsa,ed25519
+          allow_empty_commits: false
+          force_push: false

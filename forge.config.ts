@@ -4,6 +4,7 @@ import { MakerZIP } from '@electron-forge/maker-zip';
 import { MakerDeb } from '@electron-forge/maker-deb';
 import { MakerRpm } from '@electron-forge/maker-rpm';
 import { MakerDMG } from '@electron-forge/maker-dmg';
+import MakerAppImage from '@reforged/maker-appimage';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
@@ -135,6 +136,17 @@ const config: ForgeConfig = {
         categories: ['Office'],
       },
     }),
+    // Distro-agnostic single-file binary for users on Arch / NixOS / any
+    // exotic Linux. Users chmod +x and double-click; no install step.
+    new MakerAppImage(
+      {
+        options: {
+          categories: ['Office', 'Viewer'],
+          mimeType: ['application/pdf'],
+        },
+      },
+      ['linux'],
+    ),
   ],
   plugins: [
     new AutoUnpackNativesPlugin({}),

@@ -1,0 +1,66 @@
+# Maintainer: Rafael Maldonado <remdph@gmail.com>
+pkgname=nodepdf-bin
+_appname=NodePDF
+pkgver=0.1.8
+pkgrel=1
+pkgdesc="Lightweight, fast desktop PDF viewer built with Electron and React"
+arch=('x86_64')
+url="https://github.com/remdph/node-pdf"
+license=('MIT')
+provides=('nodepdf')
+conflicts=('nodepdf')
+# Runtime deps Electron needs at startup. Most Arch desktops already
+# pull these in; listed explicitly so a headless install still works.
+depends=(
+  'alsa-lib'
+  'gtk3'
+  'libnotify'
+  'libxss'
+  'libxtst'
+  'mesa'
+  'nspr'
+  'nss'
+  'xdg-utils'
+)
+optdepends=(
+  'libappindicator-gtk3: tray icon support'
+)
+options=('!strip' '!debug')
+source=(
+  "${pkgname}-${pkgver}.deb::https://github.com/remdph/node-pdf/releases/download/v${pkgver}/node-pdf_${pkgver}_amd64.deb"
+)
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$srcdir"
+  # .deb is just an ar archive — pull out data.tar.* and unpack it.
+  bsdtar -xf "${pkgname}-${pkgver}.deb"
+  mkdir -p data
+  bsdtar -xf data.tar.* -C data
+}
+
+package() {
+  cd "$srcdir/data"
+
+  # Application bundle.
+  install -dm755 "$pkgdir/opt"
+  cp -a "opt/${_appname}" "$pkgdir/opt/"
+
+  # CLI launcher symlink so users can run `node-pdf` from a terminal.
+  install -dm755 "$pkgdir/usr/bin"
+  ln -s "/opt/${_appname}/node-pdf" "$pkgdir/usr/bin/node-pdf"
+
+  # Desktop entry + icon (forge writes both into usr/share/{applications,icons}).
+  install -dm755 "$pkgdir/usr/share/applications"
+  cp -a usr/share/applications/. "$pkgdir/usr/share/applications/"
+
+  install -dm755 "$pkgdir/usr/share/icons"
+  cp -a usr/share/icons/. "$pkgdir/usr/share/icons/"
+
+  # License (forge doesn't always bundle one, fall back to symlinking from /opt).
+  install -dm755 "$pkgdir/usr/share/licenses/$pkgname"
+  if [[ -f "usr/share/doc/${_appname,,}/LICENSE" ]]; then
+    install -Dm644 "usr/share/doc/${_appname,,}/LICENSE" \
+      "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  fi
+}
