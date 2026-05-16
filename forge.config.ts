@@ -98,6 +98,13 @@ const config: ForgeConfig = {
       // based on packagerConfig.name = "NodePDF" and would not match).
       exe: 'node-pdf.exe',
       setupIcon: './icon.ico',
+      // Control Panel > Programs and Features and the "Apps & Features"
+      // settings pane read DisplayIcon from the NuGet manifest. Without
+      // iconUrl Squirrel defaults to electron.ico from the Electron repo,
+      // which shows up as the generic Atom-style icon for our install
+      // entry. Point it at our raw icon.ico in the repo (Windows caches it
+      // locally on first install).
+      iconUrl: 'https://raw.githubusercontent.com/remdph/node-pdf/main/icon.ico',
     }),
     // Keep the .zip alongside the .dmg for users who want a portable bundle.
     new MakerZIP({}, ['darwin']),
@@ -124,14 +131,20 @@ const config: ForgeConfig = {
     // NodePDF shows up in Nautilus/Dolphin/Files "Open With" for PDFs.
     // Setting NodePDF as the *default* PDF viewer is handled at first
     // launch via xdg-mime (per-user), not in a postinst script.
+    // electron-installer-{debian,redhat} only embed an icon in the
+     // .desktop file + /usr/share/pixmaps if we pass `icon` explicitly.
+     // `packagerConfig.icon` is ignored on Linux because Linux binaries
+     // don't carry an icon resource.
     new MakerRpm({
       options: {
+        icon: './icon.png',
         mimeType: ['application/pdf'],
         categories: ['Office'],
       },
     }),
     new MakerDeb({
       options: {
+        icon: './icon.png',
         mimeType: ['application/pdf'],
         categories: ['Office'],
       },
@@ -141,6 +154,7 @@ const config: ForgeConfig = {
     new MakerAppImage(
       {
         options: {
+          icon: './icon.png',
           categories: ['Office', 'Viewer'],
           mimeType: ['application/pdf'],
         },
