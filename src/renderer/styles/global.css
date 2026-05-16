@@ -1,0 +1,1801 @@
+:root {
+  --bg: #0f1115;
+  --bg-elev: #161a22;
+  --fg: #e6e6e6;
+  --fg-muted: #8b95a8;
+  --accent: #cbd5e1;
+  --accent-hover: #e2e8f0;
+  --border: #232938;
+  --danger: #ff6b6b;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* --- Global scrollbars: thin and discreet, reveal on hover --------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 0.15s ease;
+}
+
+*:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.28);
+}
+
+*::-webkit-scrollbar-thumb:active {
+  background-color: rgba(255, 255, 255, 0.4);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* --- App shell ---------------------------------------------------------- */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-content {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+}
+
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Per-tab host. Inactive tabs are kept mounted with display:none so React
+ * preserves their state (parsed PDF, snapshot cache, scroll position,
+ * zoom, etc.) across tab switches — no reload on activation. */
+.pdf-view-host {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pdf-view-host-hidden {
+  display: none;
+}
+
+/* --- Titlebar ----------------------------------------------------------- */
+.titlebar {
+  display: flex;
+  align-items: stretch;
+  height: 34px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  -webkit-user-select: none;
+  flex-shrink: 0;
+}
+
+.titlebar-brand {
+  display: flex;
+  align-items: center;
+  padding: 0 0.7rem 0 0.8rem;
+  -webkit-app-region: drag;
+  app-region: drag;
+  flex-shrink: 0;
+}
+
+.titlebar-logo {
+  height: 8px;
+  width: auto;
+  display: block;
+  pointer-events: none;
+}
+
+.titlebar-leading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+  flex-shrink: 0;
+  outline: none;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.titlebar-leading:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg);
+}
+
+.titlebar-leading:focus,
+.titlebar-leading:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.titlebar-leading-active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--accent);
+}
+
+.titlebar-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  /* Empty area to the right of the tabs stays draggable so the user can
+   * still grab the window from the titlebar; individual tabs and the
+   * overflow button opt out of drag below. */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.titlebar-controls {
+  display: flex;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.titlebar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: var(--fg-muted);
+  cursor: pointer;
+  outline: none;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.titlebar-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+  border-color: transparent;
+}
+
+.titlebar-btn:focus,
+.titlebar-btn:focus-visible {
+  outline: none;
+}
+
+.titlebar-btn-close:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* --- Tabs --------------------------------------------------------------- */
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.6rem 0 0.55rem;
+  width: 200px;
+  flex-shrink: 0;
+  background: transparent;
+  border-right: 1px solid var(--border);
+  color: var(--fg-muted);
+  cursor: pointer;
+  position: relative;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.tab:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fg);
+}
+
+.tab-active {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+
+.tab-active::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 1px;
+  background: var(--accent);
+}
+
+.tab-pdf svg:first-of-type {
+  color: var(--accent);
+}
+
+.tab svg {
+  flex-shrink: 0;
+}
+
+.tab-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  margin-top: 3px;
+}
+
+.tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  padding: 0;
+  color: var(--fg-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.tab:hover .tab-close,
+.tab-active .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--fg);
+  border-color: transparent;
+}
+
+/* --- Tab overflow ------------------------------------------------------- */
+.titlebar-tabs-overflow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0;
+  color: var(--fg-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.titlebar-tabs-overflow:hover,
+.titlebar-tabs-overflow-open {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg);
+}
+
+.titlebar-tabs-overflow:focus,
+.titlebar-tabs-overflow:focus-visible {
+  outline: none;
+}
+
+.tabs-overflow-menu {
+  position: fixed;
+  z-index: 250;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+}
+
+.tabs-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 0.78rem;
+  cursor: pointer;
+  outline: none;
+}
+
+.tabs-overflow-item:hover,
+.tabs-overflow-item:focus,
+.tabs-overflow-item:focus-visible {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.tabs-overflow-item-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabs-overflow-item-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  padding: 0;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: 700 14px/1 ui-sans-serif, system-ui, sans-serif;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.tabs-overflow-item:hover .tabs-overflow-item-close,
+.tabs-overflow-item:focus-within .tabs-overflow-item-close {
+  opacity: 1;
+}
+
+.tabs-overflow-item-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--fg);
+}
+
+/* --- Generic buttons ---------------------------------------------------- */
+button {
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 1rem;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+button.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #fff;
+}
+
+/* --- Picker (no PDF open) ---------------------------------------------- */
+.picker {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 2rem;
+  min-width: 0;
+  position: relative;
+  /* Same neutral gray as the document viewer so the "where the doc goes"
+   * placeholder reads as a continuation of the viewer surface. */
+  background: #525659;
+}
+
+.picker-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.5rem;
+  width: 100%;
+  max-width: 1100px;
+  min-width: 0;
+}
+
+
+/* --- Recents carousel -------------------------------------------------- */
+.recents {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.recents-heading {
+  margin: 0 0 0 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.recents-strip {
+  display: flex;
+  gap: 0.85rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0.25rem 0.75rem;
+  scroll-padding-inline: 0.25rem;
+}
+
+.recent-item {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  width: 130px;
+  cursor: pointer;
+  position: relative;
+  outline: none;
+}
+
+.recent-item:focus-visible .recent-thumb {
+  border-color: var(--accent);
+}
+
+.recent-thumb {
+  width: 130px;
+  height: 168px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition:
+    border-color 0.12s ease,
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.recent-item:hover .recent-thumb {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.45),
+    0 0 0 1px var(--accent);
+}
+
+.recent-thumb canvas,
+.recent-thumb-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.recent-thumb-loading {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.1),
+    rgba(255, 255, 255, 0.04)
+  );
+  background-size: 200% 100%;
+  animation: recents-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes recents-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.recent-thumb-error {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 107, 107, 0.08);
+  color: var(--danger);
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.recent-name {
+  font-size: 0.78rem;
+  color: var(--fg);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  line-height: 1.2;
+}
+
+.recent-item-add {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+}
+
+.recent-thumb-add {
+  background: transparent;
+  border: 1.5px dashed var(--border);
+  box-shadow: none;
+  color: var(--fg-muted);
+}
+
+.recent-thumb-add svg {
+  width: 50%;
+  height: 50%;
+}
+
+.recent-item-add:hover .recent-thumb-add {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--accent);
+  border-style: dashed;
+  color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: none;
+}
+
+/* --- Password dialog (modal, used for both set + unlock) ------------- */
+.password-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+  animation: print-dialog-fade 0.12s ease-out;
+}
+
+.password-dialog {
+  width: 380px;
+  max-width: 90vw;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.password-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.password-dialog-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.password-dialog-subtitle {
+  margin: 0.2rem 0 0;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.password-dialog-close {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.password-dialog-close:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+}
+
+.password-dialog-body {
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.password-dialog-help {
+  margin: 0;
+}
+
+.password-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.password-dialog-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--fg-muted);
+  letter-spacing: 0.02em;
+}
+
+.password-dialog-input {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.12s ease;
+}
+
+.password-dialog-input:focus {
+  border-color: var(--accent);
+}
+
+.password-dialog-error {
+  background: rgba(255, 107, 107, 0.08);
+  border: 1px solid rgba(255, 107, 107, 0.25);
+  border-radius: 5px;
+  padding: 0.4rem 0.6rem;
+  color: var(--danger);
+}
+
+.password-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.85rem 1.1rem;
+  border-top: 1px solid var(--border);
+}
+
+/* --- About dialog ------------------------------------------------------- */
+.about-dialog {
+  width: 380px;
+  max-width: 92vw;
+}
+
+.about-dialog-header {
+  border-bottom: 0;
+  justify-content: flex-end;
+  padding: 0.5rem 0.5rem 0;
+}
+
+.about-dialog-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1.5rem 1.5rem;
+}
+
+.about-dialog-logo {
+  width: 140px;
+  height: auto;
+  margin-bottom: 0.25rem;
+  user-select: none;
+}
+
+.about-dialog-version {
+  margin: 0;
+  letter-spacing: 0.04em;
+}
+
+.about-dialog-credits {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.about-dialog-description {
+  margin: 0;
+  max-width: 280px;
+  line-height: 1.45;
+}
+
+.about-dialog-links {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.about-dialog-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.about-dialog-link:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--accent);
+}
+
+.about-dialog-link-donate {
+  background: #ffdd00;
+  border-color: #ffdd00;
+  color: #1a1a1a;
+}
+
+.about-dialog-link-donate:hover {
+  background: #fce300;
+  border-color: #fce300;
+  color: #1a1a1a;
+}
+
+/* --- Protect dialog (extends password-dialog with permissions) -------- */
+.protect-dialog {
+  width: 440px;
+  max-width: 92vw;
+}
+
+.protect-perms {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.protect-perms legend {
+  padding: 0 0.4rem;
+  font-size: 0.78rem;
+}
+
+.protect-perm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+}
+
+.protect-perm input[type='checkbox'] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.protect-perms[disabled] .protect-perm {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* --- Print dialog (modal) --------------------------------------------- */
+.print-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+  animation: print-dialog-fade 0.12s ease-out;
+}
+
+@keyframes print-dialog-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.print-dialog {
+  width: 640px;
+  max-width: 90vw;
+  max-height: 86vh;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.print-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.print-dialog-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.print-dialog-subtitle {
+  margin: 0.2rem 0 0;
+  max-width: 460px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.print-dialog-close {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.print-dialog-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+}
+
+.print-dialog-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 1.25rem;
+  padding: 1.1rem;
+  min-height: 0;
+}
+
+.print-dialog-preview {
+  background: #525659;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem;
+  min-height: 240px;
+}
+
+.print-dialog-preview-img {
+  max-width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+
+.print-dialog-preview-empty {
+  text-align: center;
+  padding: 1rem;
+}
+
+.print-dialog-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.print-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.print-dialog-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--fg-muted);
+  letter-spacing: 0.02em;
+}
+
+.print-dialog-select,
+.print-dialog-input {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  outline: none;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.print-dialog-select:focus,
+.print-dialog-input:focus {
+  border-color: var(--accent);
+}
+
+.print-dialog-input {
+  max-width: 100px;
+}
+
+.print-dialog-error {
+  background: rgba(255, 107, 107, 0.08);
+  border: 1px solid rgba(255, 107, 107, 0.25);
+  border-radius: 5px;
+  padding: 0.5rem 0.7rem;
+  color: var(--fg);
+}
+
+.print-dialog-error strong {
+  display: block;
+  color: var(--danger);
+  margin-bottom: 0.15rem;
+}
+
+.print-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.85rem 1.1rem;
+  border-top: 1px solid var(--border);
+}
+
+/* --- Generic right-click context menu --------------------------------- */
+.context-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 180px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+  padding: 0.25rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.context-menu-item {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+  font-size: 0.82rem;
+  color: var(--fg);
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--accent);
+}
+
+/* --- PDF view ----------------------------------------------------------- */
+.pdf-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  /* Traditional PDF-viewer gray (between Adobe and macOS Preview) — the
+   * pages float as white cards on this neutral background. */
+  background: #525659;
+}
+
+.pdf-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: 36px;
+  padding: 0 0.4rem;
+  /* A touch lighter than the titlebar (--bg-elev #161a22) so the toolbar
+   * reads as a separate band rather than blending into the chrome. */
+  background: #1f2533;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+  flex-shrink: 0;
+  /* Lift above the body so the drop shadow casts downward onto the
+   * document area for a sunken-document feel. */
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+.pdf-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.pdf-toolbar-left {
+  justify-self: start;
+}
+
+.pdf-toolbar-center {
+  justify-self: center;
+}
+
+.pdf-toolbar-right {
+  justify-self: end;
+}
+
+.pdf-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 0;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.pdf-tool:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg);
+  border-color: transparent;
+}
+
+.pdf-tool:focus,
+.pdf-tool:focus-visible {
+  outline: none;
+}
+
+.pdf-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pdf-tool-active,
+.pdf-tool-active:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--accent);
+}
+
+.pdf-tool-zoom {
+  width: auto;
+  min-width: 48px;
+  padding: 0 0.5rem;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.pdf-toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 0.35rem;
+  flex-shrink: 0;
+}
+
+.pdf-paginator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  margin-left: 0.3rem;
+}
+
+.pdf-paginator-nav {
+  width: 22px;
+  height: 22px;
+}
+
+.pdf-paginator-form {
+  margin: 0;
+  display: inline-flex;
+}
+
+.pdf-paginator-input {
+  width: 36px;
+  height: 22px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 0.25rem;
+  text-align: center;
+  color: var(--fg);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+  font-family: inherit;
+  outline: none;
+}
+
+.pdf-paginator-input:focus {
+  border-color: var(--accent);
+}
+
+.pdf-paginator-input:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pdf-paginator-total {
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  margin: 0 0.2rem 0 0.05rem;
+}
+
+.pdf-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  height: 28px;
+  padding: 0 0.4rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--fg-muted);
+}
+
+.pdf-search:focus-within {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.pdf-search-input {
+  width: 160px;
+  background: transparent;
+  border: 0;
+  padding: 0 0.25rem;
+  color: var(--fg);
+  font-size: 0.78rem;
+  outline: none;
+  font-family: inherit;
+}
+
+.pdf-search-input::placeholder {
+  color: var(--fg-muted);
+}
+
+.pdf-search-count {
+  min-width: 36px;
+  text-align: right;
+  font-size: 0.7rem;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.pdf-search-nav {
+  width: 22px;
+  height: 22px;
+}
+
+/* Search highlights, applied via the CSS Custom Highlight Registry from
+ * PdfView. Two layers: a soft yellow for every match and a stronger
+ * orange for the currently-active one. */
+::highlight(pdf-search) {
+  background-color: rgba(255, 220, 0, 0.42);
+  color: #000;
+}
+
+::highlight(pdf-search-current) {
+  background-color: rgba(255, 120, 0, 0.78);
+  color: #000;
+}
+
+.text-context-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 120px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+.text-context-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 0.78rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.text-context-item:hover,
+.text-context-item:focus,
+.text-context-item:focus-visible {
+  background: rgba(255, 255, 255, 0.07);
+  outline: none;
+}
+
+.pdf-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  height: 22px;
+  padding: 0 0.75rem;
+  background: var(--bg-elev);
+  border-top: 1px solid rgba(0, 0, 0, 0.55);
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  /* Lift above the body so the shadow casts upward, mirroring the toolbar. */
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.35);
+  user-select: none;
+}
+
+.pdf-status-item {
+  white-space: nowrap;
+}
+
+.pdf-status-item strong {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.pdf-status-spacer {
+  flex: 1;
+}
+
+.pdf-status-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.pdf-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.pdf-body .react-pdf__Document {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pdf-view-status {
+  margin: 4rem auto;
+  max-width: 480px;
+  text-align: center;
+  padding: 1.5rem;
+}
+
+.pdf-view-status strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--danger);
+}
+
+.pdf-thumbs {
+  width: 180px;
+  flex-shrink: 0;
+  background: var(--bg-elev);
+  /* Soft highlight border on the right edge — distinguishes the panel from
+   * the dark document area without the harsh black hairline. */
+  border-right: 1px solid rgba(255, 255, 255, 0.3);
+  display: flex;
+  flex-direction: column;
+  /* Sits above the document area so its right-edge shadow extends into the
+   * viewer, mirroring the toolbar's downward shadow. */
+  position: relative;
+  z-index: 1;
+  box-shadow: 2px 0 6px rgba(0, 0, 0, 0.25);
+}
+
+.pdf-thumbs > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.pdf-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  width: calc(100% - 1rem);
+  margin: 0 0.5rem 0.6rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.35rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.pdf-thumb:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg);
+  border-color: transparent;
+}
+
+.pdf-thumb:focus,
+.pdf-thumb:focus-visible {
+  outline: none;
+}
+
+.pdf-thumb-active,
+.pdf-thumb-active:hover {
+  border-color: #7c8593;
+  color: var(--fg);
+}
+
+.pdf-thumb-label {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-thumb .react-pdf__Page {
+  background: #fff;
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.pdf-thumb .react-pdf__Page canvas {
+  display: block;
+}
+
+.pdf-outline {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--bg-elev);
+  border-right: 1px solid rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  position: relative;
+  z-index: 1;
+  box-shadow: 4px 0 10px rgba(0, 0, 0, 0.4);
+  padding: 0.5rem 0.25rem;
+}
+
+.pdf-outline-empty {
+  margin: 1rem 0.75rem;
+}
+
+.pdf-outline .react-pdf__Outline ul {
+  list-style: none;
+  padding-left: 0.85rem;
+  margin: 0;
+}
+
+.pdf-outline .react-pdf__Outline > ul {
+  padding-left: 0;
+}
+
+.pdf-outline .react-pdf__Outline li {
+  margin: 0;
+}
+
+.pdf-outline .react-pdf__Outline a {
+  display: block;
+  padding: 0.25rem 0.5rem;
+  margin: 1px 0;
+  color: var(--fg-muted);
+  text-decoration: none;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  border-radius: 4px;
+  cursor: pointer;
+  /* Long titles wrap instead of overflowing the panel. */
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+.pdf-outline .react-pdf__Outline a:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg);
+}
+
+.pdf-outline .react-pdf__Outline a:focus,
+.pdf-outline .react-pdf__Outline a:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--fg);
+}
+
+.pdf-pages {
+  flex: 1;
+  min-width: 0;
+}
+
+.pdf-pages-restoring {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/*
+ * The visual styling (white bg, rounded corners, shadow) lives on the wrap
+ * — NOT on .pdf-page — so that the snapshot background-image we apply to the
+ * wrap remains visible while the canvas is `visibility: hidden` during a
+ * re-render. If .pdf-page had its own white bg it would cover the snapshot.
+ */
+.pdf-page-wrap {
+  position: relative;
+  margin: 0 auto 1rem;
+  width: fit-content;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 4px 16px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.pdf-page {
+  background: transparent;
+}
+
+.pdf-page canvas {
+  display: block;
+}
+
+/* Loading placeholder rendered while pdfjs paints the canvas. White base
+ * (matches PDF page color) with a faint shimmer sweeping across so the user
+ * sees something is loading instead of a static blank area. */
+.pdf-page-placeholder {
+  background: #fff;
+  background-image: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.05) 50%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: pdf-page-shimmer 1.4s ease-in-out infinite;
+}
+
+.pdf-thumb-placeholder {
+  border-radius: 3px;
+}
+
+@keyframes pdf-page-shimmer {
+  0% {
+    background-position: 150% 0;
+  }
+  100% {
+    background-position: -50% 0;
+  }
+}
+
+/* --- Stamps menu (popover) --------------------------------------------- */
+.stamps-menu {
+  position: fixed;
+  z-index: 50;
+  width: 320px;
+  max-height: 420px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.stamps-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.stamps-menu-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.stamps-menu-add {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  border-radius: 5px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.stamps-menu-add:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.stamps-menu-empty {
+  padding: 1.25rem 0.75rem;
+  text-align: center;
+}
+
+.stamps-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  overflow-y: auto;
+}
+
+.stamp-chip {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: 100%;
+  min-height: 84px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.stamp-chip:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.stamp-chip:focus,
+.stamp-chip:focus-visible {
+  outline: none;
+}
+
+.stamp-chip-img {
+  max-width: 100%;
+  max-height: 56px;
+  object-fit: contain;
+  pointer-events: none;
+  /* checkerboard so transparent images are visible */
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.08) 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+
+.stamp-chip-label {
+  font-size: 0.72rem;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.stamp-chip-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease;
+  font: 700 14px/1 ui-sans-serif, system-ui, sans-serif;
+  padding: 0;
+  line-height: 1;
+}
+
+.stamp-chip:hover .stamp-chip-remove,
+.stamp-chip:focus-within .stamp-chip-remove {
+  opacity: 1;
+}
+
+.stamp-chip-remove:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* --- Stamp placement overlay ------------------------------------------ */
+.stamp-overlay {
+  z-index: 5;
+  /* react-rnd applies its own outline; we add a subtle hint */
+  outline: 2px dashed var(--accent);
+  outline-offset: -1px;
+  background: transparent;
+}
+
+.stamp-overlay-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.stamp-action-bar {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.5rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.4rem 0.6rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  z-index: 30;
+}
+
+.stamp-action-bar button {
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.82rem;
+}
+
+/* --- Utility ------------------------------------------------------------ */
+.muted {
+  color: var(--fg-muted);
+}
+
+.small {
+  font-size: 0.85rem;
+}

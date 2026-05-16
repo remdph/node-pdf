@@ -1,0 +1,6 @@
+allowBuilds:
+  electron: true
+  electron-winstaller: false
+  esbuild: true
+blockExoticSubdeps: false
+nodeLinker: hoisted
