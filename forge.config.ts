@@ -13,6 +13,10 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     name: 'NodePDF',
+    // Linux makers (MakerDeb in particular) expect the binary inside the
+    // packaged folder to match the lowercased project `name` field. Force
+    // it here so .deb / .rpm find the executable.
+    executableName: 'node-pdf',
     // forge resolves per-platform extensions: icon.ico / icon.icns / icon.png
     icon: './icon',
     // Make the icon available at runtime via process.resourcesPath.
