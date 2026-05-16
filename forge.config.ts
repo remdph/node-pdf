@@ -33,15 +33,20 @@ const config: ForgeConfig = {
     ],
     // macOS Launch Services registration. `LSHandlerRank: 'Owner'` claims
     // ownership of com.adobe.pdf — the most aggressive rank short of
-    // forcing default. macOS still won't make us the default automatically
-    // (Apple disallows that), but with 'Owner' the "Always Open With"
-    // override actually works (the previous 'Alternate' rank caused
-    // Launch Services to fall back to Preview, which then surfaced a
-    // "PDF damaged" error on the file). `CFBundleTypeRole: 'Viewer'` is
-    // honest about what we are: we don't implement NSDocument editing.
-    // `CFBundleTypeIconFile` + `UTImportedTypeDeclarations` give the
-    // custom red-document icon Finder paints on .pdf files associated
-    // with this app.
+    // forcing default. `CFBundleTypeRole: 'Viewer'` is honest about
+    // what we are: we don't implement NSDocument editing.
+    // `CFBundleTypeIconFile` paints the custom red-document icon on .pdf
+    // files associated with this app.
+    //
+    // We do NOT redeclare com.adobe.pdf via UTImportedTypeDeclarations:
+    // the type is owned by macOS (CoreTypes.bundle declares it since
+    // 10.4), and Johnson's 2025 reverse-engineering of the macOS 15.4
+    // Gatekeeper change (lapcatsoftware.com 2025-04-08) shows that
+    // co-declaring `public.data` in UTTypeConformsTo is one of the
+    // triggers for the "Apple could not verify '<file>.pdf' is free of
+    // malware" dialog that fires when a third-party app is the default
+    // handler for a quarantined file. Letting the system's own UTI
+    // declaration stand minimises that trigger surface.
     extendInfo: {
       CFBundleDocumentTypes: [
         {
@@ -50,18 +55,6 @@ const config: ForgeConfig = {
           LSHandlerRank: 'Owner',
           LSItemContentTypes: ['com.adobe.pdf'],
           CFBundleTypeIconFile: 'pdf-document.icns',
-        },
-      ],
-      UTImportedTypeDeclarations: [
-        {
-          UTTypeIdentifier: 'com.adobe.pdf',
-          UTTypeConformsTo: ['public.data', 'public.content'],
-          UTTypeDescription: 'PDF Document',
-          UTTypeIconFile: 'pdf-document.icns',
-          UTTypeTagSpecification: {
-            'public.filename-extension': ['pdf'],
-            'public.mime-type': ['application/pdf'],
-          },
         },
       ],
     },

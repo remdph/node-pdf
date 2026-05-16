@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog } from 'electron';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { PDFDocument } from '@cantoo/pdf-lib';
@@ -107,6 +108,18 @@ export function registerPdfIpc(): void {
 
     if (buffer.length < PDF_MAGIC.length || !buffer.subarray(0, PDF_MAGIC.length).equals(PDF_MAGIC)) {
       throw new NodePdfError('INVALID_PDF', `Not a PDF file: ${filePath}`);
+    }
+
+    // macOS 15.4+: Gatekeeper shows "Apple could not verify <file>.pdf is
+    // free of malware" when a third-party default handler opens a
+    // quarantined PDF via double-click. The check fires BEFORE 'open-file'
+    // reaches us, so we can't suppress the first occurrence — but once
+    // the user has successfully gotten the PDF into NodePDF (via Open
+    // With, File → Open, or by clicking "Open Anyway"), strip the
+    // com.apple.quarantine xattr so subsequent double-clicks skip the
+    // dialog. Best-effort, fire-and-forget; failures are silent.
+    if (process.platform === 'darwin') {
+      execFile('xattr', ['-d', 'com.apple.quarantine', filePath], () => {});
     }
 
     return new Uint8Array(buffer);
