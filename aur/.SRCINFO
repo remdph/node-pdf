@@ -20,6 +20,6 @@ pkgbase = nodepdf-bin
 	options = !strip
 	options = !debug
 	source = nodepdf-bin-0.1.8.deb::https://github.com/remdph/node-pdf/releases/download/v0.1.8/node-pdf_0.1.8_amd64.deb
-	sha256sums = SKIP
+	sha256sums = af09e194c00ae8e20729c21cd91073b02c9046741e0ede441a4fad3865d7635e
 
 pkgname = nodepdf-bin

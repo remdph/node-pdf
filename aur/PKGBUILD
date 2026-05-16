@@ -1,6 +1,5 @@
 # Maintainer: Rafael Maldonado <remdph@gmail.com>
 pkgname=nodepdf-bin
-_appname=NodePDF
 pkgver=0.1.8
 pkgrel=1
 pkgdesc="Lightweight, fast desktop PDF viewer built with Electron and React"
@@ -29,7 +28,7 @@ options=('!strip' '!debug')
 source=(
   "${pkgname}-${pkgver}.deb::https://github.com/remdph/node-pdf/releases/download/v${pkgver}/node-pdf_${pkgver}_amd64.deb"
 )
-sha256sums=('SKIP')
+sha256sums=('af09e194c00ae8e20729c21cd91073b02c9046741e0ede441a4fad3865d7635e')
 
 prepare() {
   cd "$srcdir"
@@ -42,25 +41,20 @@ prepare() {
 package() {
   cd "$srcdir/data"
 
-  # Application bundle.
-  install -dm755 "$pkgdir/opt"
-  cp -a "opt/${_appname}" "$pkgdir/opt/"
+  # The .deb already lays out files under usr/{bin,lib,share} following the
+  # FHS — copy the whole tree verbatim. `/usr/bin/node-pdf` is the launcher
+  # script and `/usr/lib/node-pdf/` holds the Electron runtime + binary.
+  cp -a usr "$pkgdir/"
 
-  # CLI launcher symlink so users can run `node-pdf` from a terminal.
-  install -dm755 "$pkgdir/usr/bin"
-  ln -s "/opt/${_appname}/node-pdf" "$pkgdir/usr/bin/node-pdf"
-
-  # Desktop entry + icon (forge writes both into usr/share/{applications,icons}).
-  install -dm755 "$pkgdir/usr/share/applications"
-  cp -a usr/share/applications/. "$pkgdir/usr/share/applications/"
-
-  install -dm755 "$pkgdir/usr/share/icons"
-  cp -a usr/share/icons/. "$pkgdir/usr/share/icons/"
-
-  # License (forge doesn't always bundle one, fall back to symlinking from /opt).
+  # Surface the bundled LICENSE under the conventional Arch location so
+  # pacman -Qi shows it and tools like vrms can find it. The .deb names
+  # the file `copyright` (Debian convention) — symlink either name we find.
   install -dm755 "$pkgdir/usr/share/licenses/$pkgname"
-  if [[ -f "usr/share/doc/${_appname,,}/LICENSE" ]]; then
-    install -Dm644 "usr/share/doc/${_appname,,}/LICENSE" \
-      "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  fi
+  for src in LICENSE copyright; do
+    if [[ -f "$pkgdir/usr/share/doc/node-pdf/$src" ]]; then
+      ln -sf "/usr/share/doc/node-pdf/$src" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+      break
+    fi
+  done
 }
