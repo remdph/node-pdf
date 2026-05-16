@@ -168,7 +168,7 @@ jobs:
           cat aur/PKGBUILD
 
       - name: Publish to AUR
-        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
         with:
           pkgname: nodepdf-bin
           pkgbuild: aur/PKGBUILD
