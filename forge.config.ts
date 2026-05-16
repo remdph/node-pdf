@@ -24,7 +24,13 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({
+      // We renamed the executable to lowercase via executableName above, so
+      // Squirrel needs to be told which .exe to wrap (defaults to <name>.exe
+      // based on packagerConfig.name = "NodePDF" and would not match).
+      exe: 'node-pdf.exe',
+      setupIcon: './icon.ico',
+    }),
     // Keep the .zip alongside the .dmg for users who want a portable bundle.
     new MakerZIP({}, ['darwin']),
     new MakerDMG({}, ['darwin']),
