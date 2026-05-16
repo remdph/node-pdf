@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+
 import { PdfView } from './components/PdfView.js';
 import { RecentsCarousel } from './components/RecentsCarousel.js';
 import { TitleBar } from './components/TitleBar.js';
@@ -9,6 +11,19 @@ export function App(): JSX.Element {
   const activeId = useTabsStore((s) => s.activeId);
   const view = useTabsStore((s) => s.view);
   const openPdf = useTabsStore((s) => s.openPdf);
+
+  // Open paths handed to us by the OS shell ("Open with NodePDF" / file
+  // double-click). Two channels:
+  //   1. flushPending() — paths that arrived before the renderer mounted
+  //      (cold start launched from Finder/Explorer).
+  //   2. onOpenExternal — live pushes while the app is already running
+  //      (macOS 'open-file' or a second-instance launch).
+  useEffect(() => {
+    void ipc.pdf.flushPending().then((paths) => {
+      for (const p of paths) openPdf({ filePath: p });
+    });
+    return ipc.pdf.onOpenExternal((filePath) => openPdf({ filePath }));
+  }, [openPdf]);
 
   const handleOpenPdf = async () => {
     const filePath = await ipc.pdf.open();

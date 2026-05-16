@@ -31,6 +31,9 @@ const api = {
   pdf: {
     open: () => invoke<string | null>(IPC_CHANNELS.pdf.open),
     read: (filePath: string) => invoke<Uint8Array>(IPC_CHANNELS.pdf.read, filePath),
+    flushPending: () => invoke<string[]>(IPC_CHANNELS.pdf.flushPending),
+    onOpenExternal: (handler: (filePath: string) => void) =>
+      subscribe<string>(IPC_CHANNELS.pdf.openExternal, handler),
     applyStamp: (input: ApplyStampInput) =>
       invoke<ApplyStampResult>(IPC_CHANNELS.pdf.applyStamp, input),
     print: (filePath: string, options?: PrintOptions) =>
