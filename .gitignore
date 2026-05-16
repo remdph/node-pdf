@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# builds
+out/
+dist/
+.vite/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# env
+.env
+.env.*
+!.env.example
+
+# Electron Forge
+.webpack/
