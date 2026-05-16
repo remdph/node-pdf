@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
+import { HomeView } from './components/HomeView.js';
 import { PdfView } from './components/PdfView.js';
-import { RecentsCarousel } from './components/RecentsCarousel.js';
 import { TitleBar } from './components/TitleBar.js';
 import { ipc } from './lib/ipc.js';
 import { useTabsStore } from './stores/tabs.js';
@@ -25,15 +25,27 @@ export function App(): JSX.Element {
     return ipc.pdf.onOpenExternal((filePath) => openPdf({ filePath }));
   }, [openPdf]);
 
-  const handleOpenPdf = async () => {
-    const filePath = await ipc.pdf.open();
-    if (filePath) openPdf({ filePath });
-  };
+  // Cmd+W (macOS) / Ctrl+W (Win/Linux): close the active tab instead of
+  // the whole window. preventDefault() in the renderer stops Electron's
+  // built-in "close window" shortcut from firing. The store is read via
+  // getState() so the effect doesn't need to re-bind on every tab change.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const accel = ipc.platform === 'darwin' ? e.metaKey : e.ctrlKey;
+      if (!accel) return;
+      if (e.key !== 'w' && e.key !== 'W') return;
+      e.preventDefault();
+      const state = useTabsStore.getState();
+      if (state.activeId) state.close(state.activeId);
+    };
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
+  }, []);
 
   // Render every open tab's PdfView side-by-side and toggle visibility via
   // CSS instead of mounting/unmounting. That way each tab keeps its parsed
   // PDF, snapshot cache, page, scroll position and zoom across tab switches.
-  const showPicker = view !== 'tab' || activeId === null;
+  const showHome = view !== 'tab' || activeId === null;
 
   return (
     <main className="app">
@@ -51,36 +63,7 @@ export function App(): JSX.Element {
               </div>
             );
           })}
-          {showPicker && (
-            <div className="picker">
-              <div className="picker-stack">
-                <section className="recents" aria-label="Open document">
-                  <h2 className="recents-heading">Open</h2>
-                  <div className="recents-strip">
-                    <button
-                      type="button"
-                      className="recent-item recent-item-add"
-                      onClick={handleOpenPdf}
-                      aria-label="Open PDF"
-                      title="Open PDF"
-                    >
-                      <div className="recent-thumb recent-thumb-add">
-                        <svg viewBox="0 0 48 48" fill="none" aria-hidden>
-                          <path
-                            d="M24 14 V34 M14 24 H34"
-                            stroke="currentColor"
-                            strokeWidth="2.4"
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                      </div>
-                    </button>
-                  </div>
-                </section>
-                <RecentsCarousel />
-              </div>
-            </div>
-          )}
+          {showHome && <HomeView />}
         </div>
       </div>
     </main>

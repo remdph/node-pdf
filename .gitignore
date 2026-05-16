@@ -27,3 +27,9 @@ Thumbs.db
 
 # Electron Forge
 .webpack/
+
+# Affinity Designer working files (icon source, not for repo)
+Untitled.af
+Untitled.af~lock~
+*.af~lock~
+
