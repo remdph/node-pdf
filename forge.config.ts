@@ -8,6 +8,8 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import { notarize } from '@electron/notarize';
+import { execFileSync } from 'node:child_process';
 
 const config: ForgeConfig = {
   packagerConfig: {
@@ -21,19 +23,30 @@ const config: ForgeConfig = {
     icon: './icon',
     // Make the icon available at runtime via process.resourcesPath.
     extraResource: ['./icon.png'],
-    // Ad-hoc signing for macOS — no Apple Developer account required, but
-    // satisfies the Apple Silicon hard requirement that every binary be
-    // at least signed ad-hoc. The entitlements file unlocks the V8 JIT
-    // and disables library validation so the bundled helpers/frameworks
-    // can load without an Apple Developer signature.
+    // macOS code signing with a Developer ID Application certificate.
+    // Falls back to ad-hoc signing when APPLE_SIGNING_IDENTITY is unset
+    // (e.g. forks/CI without secrets) so the build doesn't fail outright.
     osxSign: {
-      identity: '-',
+      identity:
+        process.env.APPLE_SIGNING_IDENTITY ||
+        'Developer ID Application: HONTRACK S. DE R.L. (A384K33T3Y)',
       optionsForFile: () => ({
         hardenedRuntime: true,
         entitlements: './build/entitlements.mac.plist',
         'entitlements-inherit': './build/entitlements.mac.plist',
       }),
     },
+    // Notarize the signed .app with Apple. Only runs when the three env
+    // vars are present — otherwise forge silently skips notarization,
+    // which keeps local "just build something" workflows usable.
+    osxNotarize:
+      process.env.APPLE_ID && process.env.APPLE_ID_PASSWORD && process.env.APPLE_TEAM_ID
+        ? {
+            appleId: process.env.APPLE_ID,
+            appleIdPassword: process.env.APPLE_ID_PASSWORD,
+            teamId: process.env.APPLE_TEAM_ID,
+          }
+        : undefined,
   },
   rebuildConfig: {},
   makers: [
@@ -82,6 +95,47 @@ const config: ForgeConfig = {
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
     }),
   ],
+  hooks: {
+    // electron-forge signs and notarizes the .app inside packagerConfig,
+    // but the .dmg produced by MakerDMG is left unsigned. Sign + notarize +
+    // staple the DMG itself so Gatekeeper accepts the downloaded volume
+    // (`spctl --assess --type install` → "Notarized Developer ID").
+    postMake: async (_forgeConfig, makeResults) => {
+      if (process.platform !== 'darwin') return makeResults;
+
+      const identity =
+        process.env.APPLE_SIGNING_IDENTITY ||
+        'Developer ID Application: HONTRACK S. DE R.L. (A384K33T3Y)';
+      const { APPLE_ID, APPLE_ID_PASSWORD, APPLE_TEAM_ID } = process.env;
+      const canNotarize = Boolean(APPLE_ID && APPLE_ID_PASSWORD && APPLE_TEAM_ID);
+
+      for (const result of makeResults) {
+        for (const artifact of result.artifacts) {
+          if (!artifact.endsWith('.dmg')) continue;
+          console.log(`[postMake] signing ${artifact}`);
+          execFileSync(
+            'codesign',
+            ['--sign', identity, '--timestamp', '--force', artifact],
+            { stdio: 'inherit' },
+          );
+          if (!canNotarize) {
+            console.log('[postMake] notarize env vars missing, skipping notarization');
+            continue;
+          }
+          console.log(`[postMake] notarizing ${artifact} (Apple round-trip)`);
+          await notarize({
+            appPath: artifact,
+            appleId: APPLE_ID!,
+            appleIdPassword: APPLE_ID_PASSWORD!,
+            teamId: APPLE_TEAM_ID!,
+          });
+          console.log(`[postMake] stapling ${artifact}`);
+          execFileSync('xcrun', ['stapler', 'staple', artifact], { stdio: 'inherit' });
+        }
+      }
+      return makeResults;
+    },
+  },
 };
 
 export default config;
