@@ -5,6 +5,14 @@ All notable changes to NodePDF will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-05-15
+
+### Fixed
+- macOS: ad-hoc sign the .app bundle so Apple Silicon stops flagging
+  downloaded copies as "damaged and can't be opened". Users who already
+  installed 0.1.0 can also fix it manually with
+  `xattr -dr com.apple.quarantine /Applications/NodePDF.app`.
+
 ## [0.1.0] — 2026-05-15
 
 Initial public release.
@@ -51,4 +59,5 @@ Initial public release.
 - Windows: Squirrel `.exe` installer.
 - macOS: `.dmg` disk image and `.zip` portable bundle.
 
+[0.1.1]: https://github.com/remdph/node-pdf/releases/tag/v0.1.1
 [0.1.0]: https://github.com/remdph/node-pdf/releases/tag/v0.1.0

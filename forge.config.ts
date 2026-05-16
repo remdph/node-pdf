@@ -21,6 +21,16 @@ const config: ForgeConfig = {
     icon: './icon',
     // Make the icon available at runtime via process.resourcesPath.
     extraResource: ['./icon.png'],
+    // Ad-hoc signing for macOS — no Apple Developer account required, but
+    // satisfies the Apple Silicon hard requirement that every binary be
+    // at least signed ad-hoc. Without this, downloaded .app bundles get
+    // flagged as "damaged" and refuse to launch.
+    osxSign: {
+      identity: '-',
+      optionsForFile: () => ({
+        hardenedRuntime: false,
+      }),
+    },
   },
   rebuildConfig: {},
   makers: [
