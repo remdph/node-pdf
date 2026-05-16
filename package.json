@@ -37,7 +37,9 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "electron",
-      "electron-squirrel-startup"
+      "electron-squirrel-startup",
+      "fs-xattr",
+      "macos-alias"
     ]
   },
   "devDependencies": {
