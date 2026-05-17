@@ -69,9 +69,10 @@ if (app.isPackaged) {
   if (launchFile) addPendingFile(launchFile);
 }
 
-// HiDPI / fractional scale on Linux. Chromium's Wayland fractional-scale
-// support is unreliable, so we read the desired factor from NODEPDF_SCALE
-// (fallback: GDK_SCALE) and force it. Unset both to let the OS decide.
+// HiDPI / fractional scale on Linux. On Wayland the compositor reports the
+// effective scale via WaylandFractionalScaleV1, so trust it and only fall
+// back to GDK_SCALE on X11 (where toolkits historically used that var).
+// NODEPDF_SCALE remains an explicit override for either session type.
 // Privileged scheme registration MUST happen before app is ready.
 registerStampScheme();
 
@@ -81,7 +82,15 @@ if (process.platform === 'linux') {
     'enable-features',
     'WaylandFractionalScaleV1,WaylandWindowDecorations',
   );
-  const rawScale = process.env.NODEPDF_SCALE ?? process.env.GDK_SCALE;
+  const isWayland = process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY;
+  // On Wayland the compositor owns scaling. GTK env vars still leak into
+  // Chromium's font/UI sizing path even when we don't pass them as flags,
+  // so wipe them unless the user explicitly opts in via NODEPDF_SCALE.
+  if (isWayland && !process.env.NODEPDF_SCALE) {
+    delete process.env.GDK_SCALE;
+    delete process.env.GDK_DPI_SCALE;
+  }
+  const rawScale = process.env.NODEPDF_SCALE ?? (isWayland ? undefined : process.env.GDK_SCALE);
   const scale = rawScale ? Number.parseFloat(rawScale) : NaN;
   if (Number.isFinite(scale) && scale > 0) {
     app.commandLine.appendSwitch('force-device-scale-factor', String(scale));

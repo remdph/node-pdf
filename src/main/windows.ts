@@ -71,7 +71,20 @@ export function createMainWindow(): BrowserWindow {
   });
 
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    void win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+    const devUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL;
+    // electron-forge launches Electron concurrently with the Vite dev server,
+    // so the first loadURL can lose the race with Vite's listen() and surface
+    // ERR_CONNECTION_REFUSED. Without a retry the renderer stays blank.
+    win.webContents.on('did-fail-load', (_e, errorCode, _desc, validatedUrl) => {
+      if (win.isDestroyed()) return;
+      if (validatedUrl && !validatedUrl.startsWith(devUrl)) return;
+      if (errorCode === -102 || errorCode === -105 || errorCode === -7) {
+        setTimeout(() => {
+          if (!win.isDestroyed()) void win.loadURL(devUrl);
+        }, 250);
+      }
+    });
+    void win.loadURL(devUrl);
     win.webContents.once('did-finish-load', () => {
       win.webContents.openDevTools({ mode: 'detach' });
     });
