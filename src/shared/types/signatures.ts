@@ -123,6 +123,23 @@ export interface ExistingSignatureInfo {
   trustStatus: SignatureTrustStatus;
   /** CN of the trusted root when trustStatus === 'trusted'. */
   trustedRootCN: string | null;
+  // -------------------------------------------------------------------------
+  // Revocation (OCSP) — independent of integrity AND trust. A cert can be
+  // technically valid (chain ok, not expired) yet revoked by the CA, e.g.
+  // after a private-key compromise.
+  // -------------------------------------------------------------------------
+  /** Revocation verdict from the OCSP responder:
+   *   - 'good': responder confirmed the cert is in good standing
+   *   - 'revoked': responder confirmed revocation (with optional timestamp)
+   *   - 'unknown': responder didn't know about the cert
+   *   - 'unchecked': we couldn't reach the responder (no AIA URL, network
+   *     failure, no issuer cert in the CMS, etc.). Distinct from 'unknown'
+   *     because it's our limitation, not the responder's verdict. */
+  revocationStatus: 'good' | 'revoked' | 'unknown' | 'unchecked';
+  /** ISO timestamp the cert was revoked, if revocationStatus === 'revoked'. */
+  revokedAt?: string;
+  /** RFC 5280 revocation reason code name, if the responder included it. */
+  revocationReason?: string;
 }
 
 export interface InspectSignaturesResult {
@@ -156,6 +173,10 @@ export interface SignDigitalInput {
   pageIndex?: number;
   /** Normalized rect for the visual appearance. Ignored when invisible. */
   rect?: NormRect;
+  /** Optional RFC 3161 TSA URL. When set, the signer requests a trusted
+   * timestamp and embeds it as an unsignedAttribute in the SignerInfo,
+   * upgrading the signature to PAdES-T (still verifiable past cert expiry). */
+  tsaUrl?: string;
 }
 
 export interface SignDigitalResult {

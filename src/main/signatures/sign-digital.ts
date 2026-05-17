@@ -5,47 +5,63 @@ import {
   PDFDict,
   PDFDocument,
   PDFHexString,
+  PDFImage,
   PDFName,
   PDFNumber,
+  PDFRawStream,
   PDFRef,
   PDFString,
 } from '@cantoo/pdf-lib';
 import forge from 'node-forge';
 
 import { NodePdfError } from '~shared/types/errors.js';
+import type { NormRect } from '~shared/types/stamps.js';
 
 import { readCertP12 } from '../certs/storage.js';
 import { parseP12 } from '../certs/crypto.js';
+import { findSignature } from './storage.js';
+import { requestTimestampToken } from './tsa.js';
 
 /**
  * PDF cryptographic signing pipeline (PKCS#7 / CMS detached, adbe.pkcs7.detached).
  *
- * The signing flow is the classic placeholder + byte-patch dance:
+ * Approach: INCREMENTAL UPDATE. We load the PDF, take a snapshot, attach a
+ * /Sig field (+ widget, + AcroForm bookkeeping), and ask pdf-lib to emit
+ * only the *delta* — new objects + updated xref + new trailer. The original
+ * PDF bytes are preserved verbatim. This is the canonical way to add
+ * signatures to a PDF per ISO 32000 §12.8 and unlocks two important cases:
  *
- *  1. Build a /Sig dict whose /ByteRange is a huge-numbers placeholder and
- *     whose /Contents is an all-zero hex string of `placeholderHexLength`
- *     characters (16 KB binary = 32 KB hex chars by default).
- *  2. Save the PDF with `useObjectStreams: false` so object positions are
- *     deterministic and the placeholder string survives serialization
- *     verbatim. Encryption is incompatible with signatures; we sign first
- *     and re-encrypt the final bytes if the source PDF was encrypted.
- *  3. Locate the placeholder in the output bytes, derive the real ByteRange
- *     from its offsets, and patch the ByteRange placeholder in-place
- *     (preserving byte length so offsets stay stable).
- *  4. Hash the byte range with SHA-256 by way of node-forge's PKCS#7
- *     pipeline (we feed it the raw signed bytes; it derives the hash
- *     internally as the `messageDigest` authenticated attribute).
- *  5. Replace the Contents placeholder with the hex-encoded CMS, padded
- *     with zeros to fill the slot.
+ *  1. Encrypted PDFs work without re-encryption (which would shift offsets
+ *     and break ByteRange). The original encrypted objects stay encrypted;
+ *     the new /Sig.Contents is exempt from encryption per spec, so the
+ *     placeholder remains findable in the appended bytes.
+ *  2. Multi-signing: each subsequent sign is another incremental layer that
+ *     doesn't disturb earlier signatures' byte ranges.
  *
- * v1 caveats:
- *  - Only INVISIBLE signatures (no on-page widget appearance). Visual
- *    appearances ride alongside via the eSignature flow (Fase 1).
- *  - Re-encryption restores the default broad permission set on PDFs that
- *    were originally password-protected — same limitation as embedImageOnPage.
- *  - Adobe Reader will show "validity unknown" for self-signed certs
- *    because the root isn't in the AATL. That's expected; user can add the
- *    cert to their trusted identities in Acrobat to upgrade the verdict.
+ * Pipeline:
+ *
+ *  1. Load with `forIncrementalUpdate: true`, take a snapshot of the
+ *     existing object table.
+ *  2. Embed image (if visible) + register a /Sig dict whose /ByteRange is a
+ *     known-pattern placeholder and whose /Contents is a 16 KB all-zero hex
+ *     slot. Attach a widget annotation (visible or invisible) to the target
+ *     page; update AcroForm.Fields.
+ *  3. Call `saveIncremental(snapshot, { useObjectStreams: false })`. The
+ *     returned buffer contains only the delta; concatenate to the original
+ *     bytes for the full signed PDF body.
+ *  4. Locate the /Contents placeholder in the combined bytes, derive the
+ *     real ByteRange (covers the entire file except the hex slot), patch
+ *     the ByteRange placeholder in place (preserving byte length).
+ *  5. Hash the byte range with SHA-256 via node-forge's PKCS#7 pipeline
+ *     (which auto-populates the `messageDigest` signed attribute).
+ *  6. Optionally request a TSA TimeStampToken and embed it as an
+ *     unsignedAttribute on the SignerInfo (PAdES-T).
+ *  7. Hex-encode + zero-pad the CMS into the Contents slot.
+ *
+ * Caveats:
+ *  - Trust chain validation is Mozilla-bundle only (no OS trust store yet)
+ *    — that's why a self-signed cert shows "validity unknown" in Reader.
+ *  - We don't yet do OCSP/CRL revocation checking at sign time (Fase 5+).
  */
 
 const PLACEHOLDER_BYTE_LENGTH = 16384; // 16 KB CMS slot
@@ -65,6 +81,23 @@ export interface SignDigitalOptions {
   reason?: string;
   location?: string;
   contactInfo?: string;
+  /** Optional id of a stored visual signature (eSignature from Fase 1).
+   * When present, the /Sig widget gets a Form XObject /AP/N appearance
+   * showing the image at the given page+rect — the signature becomes
+   * VISIBLE on the page instead of just appearing in the Signatures panel. */
+  visualSignatureId?: string;
+  /** 0-based page index for the visible appearance. Required when
+   * visualSignatureId is set; ignored otherwise. */
+  pageIndex?: number;
+  /** Normalized [0..1] rect in top-left coords (renderer convention).
+   * Required when visualSignatureId is set; ignored otherwise. */
+  rect?: NormRect;
+  /** Optional RFC 3161 Trusted Timestamp Authority URL. When set, we POST
+   * SHA-256(signatureValue) to the TSA and embed the returned token as an
+   * unsignedAttribute in the SignerInfo. This upgrades the signature to
+   * PAdES-T and proves the signature existed at the TSA's reported time,
+   * which keeps it verifiable after the signer's cert expires. */
+  tsaUrl?: string;
 }
 
 /** Format a Date as PDF date string: `D:YYYYMMDDHHmmSSZ`. */
@@ -82,15 +115,139 @@ function formatPdfDate(d: Date): string {
 }
 
 /**
+ * OID for `id-aa-signatureTimeStampToken` — the unsignedAttribute that
+ * carries an RFC 3161 TimeStampToken inside a SignerInfo. Verifiers chain
+ * the TST's own signature back to a trusted TSA root and treat the
+ * resulting timestamp as proof the signature existed at that time.
+ */
+const OID_SIG_TIMESTAMP_TOKEN = '1.2.840.113549.1.9.16.2.14';
+
+/** Walk the CMS ASN.1 tree built by forge.pkcs7 and find the bytes of the
+ * SignerInfo's signatureValue (an OCTET STRING in the standard layout).
+ * We need this to hash for the TSA request — the TST signs the signature
+ * value, which is what proves "this signature existed at time X". */
+function extractSignerInfoSignatureBytes(cms: forge.asn1.Asn1): Buffer {
+  // ContentInfo SEQ → [0] EXPLICIT SignedData SEQ → ... → signerInfos SET
+  // → SignerInfo SEQ → walk children to find the OCTET STRING after any
+  // [0] IMPL signedAttrs.
+  const ciChildren = cms.value as forge.asn1.Asn1[];
+  const explicit = ciChildren[1]!;
+  const signedData = (explicit.value as forge.asn1.Asn1[])[0]!;
+  const sdChildren = signedData.value as forge.asn1.Asn1[];
+  // signerInfos is the only universal SET in SignedData.
+  let signerInfos: forge.asn1.Asn1 | null = null;
+  for (const ch of sdChildren) {
+    if (
+      ch.tagClass === forge.asn1.Class.UNIVERSAL &&
+      (ch.type as number) === forge.asn1.Type.SET
+    ) {
+      signerInfos = ch;
+    }
+  }
+  if (!signerInfos) throw new NodePdfError('READ_FAILED', 'CMS has no signerInfos');
+  const signerInfo = (signerInfos.value as forge.asn1.Asn1[])[0]!;
+  const siChildren = signerInfo.value as forge.asn1.Asn1[];
+  // Layout: [version, sid, digestAlg, signedAttrs?, sigAlg, signature, unsignedAttrs?]
+  let idx = 3;
+  const maybeSigned = siChildren[idx];
+  if (
+    maybeSigned &&
+    maybeSigned.tagClass === forge.asn1.Class.CONTEXT_SPECIFIC &&
+    (maybeSigned.type as number) === 0
+  ) {
+    idx++;
+  }
+  idx++; // skip sigAlg SEQ
+  const sigNode = siChildren[idx];
+  if (!sigNode || typeof sigNode.value !== 'string') {
+    throw new NodePdfError('READ_FAILED', 'CMS signatureValue not found');
+  }
+  const raw = sigNode.value;
+  const buf = Buffer.alloc(raw.length);
+  for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i) & 0xff;
+  return buf;
+}
+
+/** Inject (or extend) the SignerInfo's unsignedAttributes with the given
+ * attribute, by mutating the ASN.1 tree in place. Used to attach the TSA
+ * TimeStampToken without going through forge's high-level API (which
+ * doesn't expose post-sign mutation cleanly). */
+function injectUnsignedAttribute(
+  cms: forge.asn1.Asn1,
+  attrTypeOid: string,
+  attrValue: forge.asn1.Asn1,
+): void {
+  const ciChildren = cms.value as forge.asn1.Asn1[];
+  const explicit = ciChildren[1]!;
+  const signedData = (explicit.value as forge.asn1.Asn1[])[0]!;
+  const sdChildren = signedData.value as forge.asn1.Asn1[];
+  let signerInfos: forge.asn1.Asn1 | null = null;
+  for (const ch of sdChildren) {
+    if (
+      ch.tagClass === forge.asn1.Class.UNIVERSAL &&
+      (ch.type as number) === forge.asn1.Type.SET
+    ) {
+      signerInfos = ch;
+    }
+  }
+  if (!signerInfos) throw new NodePdfError('READ_FAILED', 'CMS has no signerInfos');
+  const signerInfo = (signerInfos.value as forge.asn1.Asn1[])[0]!;
+  const siChildren = signerInfo.value as forge.asn1.Asn1[];
+
+  // Attribute SEQ { OID, SET OF AttributeValue }
+  const attribute = forge.asn1.create(
+    forge.asn1.Class.UNIVERSAL,
+    forge.asn1.Type.SEQUENCE,
+    true,
+    [
+      forge.asn1.create(
+        forge.asn1.Class.UNIVERSAL,
+        forge.asn1.Type.OID,
+        false,
+        forge.asn1.oidToDer(attrTypeOid).getBytes(),
+      ),
+      forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SET, true, [
+        attrValue,
+      ]),
+    ],
+  );
+
+  // Check if unsignedAttrs already exists (CONTEXT [1] IMPLICIT). If so,
+  // append our attribute to it; otherwise create a new one.
+  const last = siChildren[siChildren.length - 1];
+  if (
+    last &&
+    last.tagClass === forge.asn1.Class.CONTEXT_SPECIFIC &&
+    (last.type as number) === 1
+  ) {
+    (last.value as forge.asn1.Asn1[]).push(attribute);
+  } else {
+    const unsignedAttrs = forge.asn1.create(
+      forge.asn1.Class.CONTEXT_SPECIFIC,
+      1,
+      true,
+      [attribute],
+    );
+    siChildren.push(unsignedAttrs);
+  }
+}
+
+/**
  * Construct a SignedData CMS message over the concatenated byte range using
  * the supplied cert + key. Returns the DER bytes (binary string from forge,
  * one byte per char — caller hex-encodes).
+ *
+ * When `tsaUrl` is provided, after sign() we hash the resulting
+ * signatureValue, request an RFC 3161 TimeStampToken from the TSA, and
+ * embed it as an unsignedAttribute in the SignerInfo — upgrading the
+ * signature to PAdES-T grade (still verifiable after cert expiry).
  */
-function buildCmsSignature(
+async function buildCmsSignature(
   cert: forge.pki.Certificate,
   keyPem: string,
   signedContent: Buffer,
-): Uint8Array {
+  tsaUrl?: string,
+): Promise<Uint8Array> {
   const p7 = forge.pkcs7.createSignedData();
   // forge owns the binary→ASN.1 dance; pass a binary string buffer.
   p7.content = forge.util.createBuffer(signedContent.toString('binary'));
@@ -117,7 +274,18 @@ function buildCmsSignature(
   });
   p7.sign({ detached: true });
 
-  const der = forge.asn1.toDer(p7.toAsn1()).getBytes();
+  const cmsAsn1 = p7.toAsn1();
+
+  if (tsaUrl) {
+    // PAdES-T upgrade: hash the signatureValue, ask the TSA to timestamp
+    // that hash, embed the returned TST as an unsignedAttribute. The
+    // signature won't expire when the signer cert does.
+    const sigValueBytes = extractSignerInfoSignatureBytes(cmsAsn1);
+    const tst = await requestTimestampToken(sigValueBytes, { url: tsaUrl });
+    injectUnsignedAttribute(cmsAsn1, OID_SIG_TIMESTAMP_TOKEN, tst);
+  }
+
+  const der = forge.asn1.toDer(cmsAsn1).getBytes();
   const out = new Uint8Array(der.length);
   for (let i = 0; i < der.length; i++) out[i] = der.charCodeAt(i) & 0xff;
   return out;
@@ -209,12 +377,68 @@ function patchContents(pdfBytes: Buffer, hexStart: number, cmsDer: Uint8Array): 
   return out;
 }
 
-/** Append a signature field + sig dict to the document. The widget is
- * invisible (zero rect on the first page, hidden + locked flags), suitable
- * for a pure-crypto signature without on-page appearance. */
-function addInvisibleSignatureField(
+/**
+ * Build the Form XObject that the /Sig widget uses as its /AP /N visual
+ * appearance. The content stream is a tiny PostScript-flavored snippet:
+ *
+ *   q  width 0 0 height 0 0 cm  /Im0 Do  Q
+ *
+ * which positions the embedded image at the BBox origin and scales it to
+ * BBox size. Resources reference the Image XObject under the local name
+ * `Im0` (the only one we use).
+ */
+function buildAppearanceStream(
+  doc: PDFDocument,
+  image: PDFImage,
+  widthPt: number,
+  heightPt: number,
+): PDFRawStream {
+  const ctx = doc.context;
+  // pdf-lib serializes numbers fine; we just need integers/floats with
+  // enough precision for sub-point alignment.
+  const w = widthPt.toFixed(2);
+  const h = heightPt.toFixed(2);
+  const contentBytes = new TextEncoder().encode(
+    `q\n${w} 0 0 ${h} 0 0 cm\n/Im0 Do\nQ\n`,
+  );
+
+  const resources = ctx.obj({
+    XObject: ctx.obj({
+      Im0: image.ref,
+    }),
+    // /ProcSet is legacy but Adobe Reader still flags its absence in some
+    // strict modes. Tiny cost to include it for max compatibility.
+    ProcSet: ['PDF', 'ImageC'],
+  });
+  const formDict = ctx.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    FormType: 1,
+    BBox: [0, 0, widthPt, heightPt],
+    Resources: resources,
+  });
+  return PDFRawStream.of(formDict, contentBytes);
+}
+
+interface VisibleAppearance {
+  pageIndex: number;
+  /** PDF-coords rect (origin at bottom-left). */
+  pdfRect: { x: number; y: number; width: number; height: number };
+  image: PDFImage;
+}
+
+/**
+ * Append a /Sig field + widget annotation to the document. With no
+ * `visible` arg, the widget is invisible (zero rect + Hidden+Locked flags)
+ * and the signature only appears in the viewer's Signatures panel. When
+ * `visible` is provided, the widget gets a real rect on the chosen page
+ * plus an /AP /N Form XObject that paints the supplied image — what
+ * Adobe Reader calls a "visual signature appearance".
+ */
+function addSignatureField(
   doc: PDFDocument,
   opts: { reason?: string; location?: string; contactInfo?: string },
+  visible: VisibleAppearance | null,
 ): void {
   const ctx = doc.context;
 
@@ -234,27 +458,56 @@ function addInvisibleSignatureField(
   });
   const sigRef = ctx.register(sigDict);
 
-  // The first page is just where we anchor the widget — the rect is zero
-  // and flag 0b10000100 = 132 (Hidden + Locked) keeps it off-screen and
-  // immutable. Adobe still shows the signature in the Signatures panel.
   const pages = doc.getPages();
   if (pages.length === 0) {
     throw new NodePdfError('VALIDATION_ERROR', 'PDF has no pages to attach signature to');
   }
-  const firstPage = pages[0]!;
-  const firstPageRef = firstPage.ref;
 
-  const widget = ctx.obj({
-    Type: 'Annot',
-    Subtype: 'Widget',
-    FT: 'Sig',
-    T: PDFString.of(`Signature${Date.now()}`),
-    V: sigRef,
-    P: firstPageRef,
-    Rect: [0, 0, 0, 0],
-    F: 132,
-  });
-  const widgetRef = ctx.register(widget);
+  let widgetDict: PDFDict;
+  let targetPageIndex: number;
+  if (visible) {
+    if (visible.pageIndex < 0 || visible.pageIndex >= pages.length) {
+      throw new NodePdfError(
+        'VALIDATION_ERROR',
+        `Page index ${visible.pageIndex} out of range (doc has ${pages.length} pages)`,
+      );
+    }
+    targetPageIndex = visible.pageIndex;
+    const r = visible.pdfRect;
+    // Build the appearance stream + dict referencing it via /N.
+    const apStream = buildAppearanceStream(doc, visible.image, r.width, r.height);
+    const apRef = ctx.register(apStream);
+    const apDict = ctx.obj({ N: apRef });
+
+    widgetDict = ctx.obj({
+      Type: 'Annot',
+      Subtype: 'Widget',
+      FT: 'Sig',
+      T: PDFString.of(`Signature${Date.now()}`),
+      V: sigRef,
+      P: pages[targetPageIndex]!.ref,
+      // PDF /Rect is [llx lly urx ury] in PDF coords (origin bottom-left).
+      Rect: [r.x, r.y, r.x + r.width, r.y + r.height],
+      // F=4 = Print flag only. NOT Hidden/Locked so the appearance renders.
+      F: 4,
+      AP: apDict,
+    });
+  } else {
+    targetPageIndex = 0;
+    widgetDict = ctx.obj({
+      Type: 'Annot',
+      Subtype: 'Widget',
+      FT: 'Sig',
+      T: PDFString.of(`Signature${Date.now()}`),
+      V: sigRef,
+      P: pages[targetPageIndex]!.ref,
+      Rect: [0, 0, 0, 0],
+      // 0b10000100 = Hidden + Locked. Keeps the widget off-screen and
+      // immutable. Adobe still shows the signature in the Signatures panel.
+      F: 132,
+    });
+  }
+  const widgetRef = ctx.register(widgetDict);
 
   // Splice into AcroForm. Create one if the PDF doesn't have a form yet.
   const acroFormRaw = doc.catalog.get(PDFName.of('AcroForm'));
@@ -285,27 +538,19 @@ function addInvisibleSignatureField(
   // safety so viewers know modifications require an incremental update.
   acroForm.set(PDFName.of('SigFlags'), PDFNumber.of(3));
 
-  // Pages with signature widgets must reference the widget in their /Annots
-  // so Reader can find it visually (even though our rect is empty).
-  const annotsRaw = firstPage.node.get(PDFName.of('Annots'));
+  // The page hosting the widget MUST include it in its /Annots — both for
+  // visible (so Reader paints it) and invisible (so Reader can resolve
+  // clicks / focus / signature panel cross-references).
+  const targetPage = pages[targetPageIndex]!;
+  const annotsRaw = targetPage.node.get(PDFName.of('Annots'));
   if (annotsRaw instanceof PDFArray) {
     annotsRaw.push(widgetRef);
   } else {
-    firstPage.node.set(PDFName.of('Annots'), ctx.obj([widgetRef]));
+    targetPage.node.set(PDFName.of('Annots'), ctx.obj([widgetRef]));
   }
 }
 
 export async function signPdfDigitally(opts: SignDigitalOptions): Promise<void> {
-  if (opts.password) {
-    // Fail fast: encryption + signing requires an incremental-update flow
-    // we don't have yet (re-encrypting post-sign shifts ByteRange offsets
-    // and breaks the hash). User should remove protection first.
-    throw new NodePdfError(
-      'VALIDATION_ERROR',
-      'Cannot digitally sign an encrypted PDF in v1. Remove password protection first, then re-apply it after signing.',
-    );
-  }
-
   // ---- 1. Read PDF + cert ------------------------------------------------
   let pdfBytes: Buffer;
   try {
@@ -324,31 +569,101 @@ export async function signPdfDigitally(opts: SignDigitalOptions): Promise<void> 
   }
   const { cert, keyPem } = parseP12(new Uint8Array(p12Bytes), opts.certPassword);
 
-  // ---- 2. Add placeholder /Sig field + save -------------------------------
+  // ---- 2. Add placeholder /Sig field + save (incremental) ----------------
+  // Loading with `forIncrementalUpdate: true` makes saveIncremental return
+  // only the appended objects + new xref + trailer — the original PDF
+  // bytes are preserved verbatim. Critical for two reasons:
+  //   1. Encrypted PDFs: original encrypted objects stay encrypted; we
+  //      only add new objects. /Sig.Contents is exempt from encryption
+  //      per spec so the placeholder remains findable.
+  //   2. Multi-sig PDFs (future): adding signature #2 doesn't invalidate
+  //      signature #1 because #1's byte-range bytes don't change.
   let doc: PDFDocument;
   try {
-    doc = await PDFDocument.load(pdfBytes);
+    doc = await PDFDocument.load(pdfBytes, {
+      forIncrementalUpdate: true,
+      ...(opts.password ? { password: opts.password } : {}),
+    });
   } catch (err) {
     throw new NodePdfError('INVALID_PDF', 'PDF could not be parsed', err);
   }
+  const snapshot = doc.takeSnapshot();
 
-  addInvisibleSignatureField(doc, {
-    reason: opts.reason,
-    location: opts.location,
-    contactInfo: opts.contactInfo,
-  });
+  // Prepare the visible appearance (if requested) BEFORE saving — we need
+  // pdf-lib to embed the image as an Image XObject during serialization.
+  let visible: VisibleAppearance | null = null;
+  if (opts.visualSignatureId) {
+    if (
+      opts.pageIndex === undefined ||
+      !opts.rect ||
+      ![opts.rect.x, opts.rect.y, opts.rect.w, opts.rect.h].every(
+        (n) => Number.isFinite(n) && n >= 0 && n <= 1,
+      )
+    ) {
+      throw new NodePdfError(
+        'VALIDATION_ERROR',
+        'Visible signature requires pageIndex + normalized rect (0..1)',
+      );
+    }
+    const found = await findSignature(opts.visualSignatureId);
+    if (!found) {
+      throw new NodePdfError(
+        'VALIDATION_ERROR',
+        `Visual signature not found: ${opts.visualSignatureId}`,
+      );
+    }
+    const imageBytes = new Uint8Array(found.bytes);
+    const image =
+      found.signature.ext === 'png'
+        ? await doc.embedPng(imageBytes)
+        : await doc.embedJpg(imageBytes);
+    const page = doc.getPages()[opts.pageIndex];
+    if (!page) {
+      throw new NodePdfError(
+        'VALIDATION_ERROR',
+        `Page index ${opts.pageIndex} out of range`,
+      );
+    }
+    const { width: pageW, height: pageH } = page.getSize();
+    const widthPt = opts.rect.w * pageW;
+    const heightPt = opts.rect.h * pageH;
+    // Renderer rect uses top-left origin; PDF uses bottom-left. Convert.
+    const xPt = opts.rect.x * pageW;
+    const yPt = pageH - opts.rect.y * pageH - heightPt;
+    visible = {
+      pageIndex: opts.pageIndex,
+      pdfRect: { x: xPt, y: yPt, width: widthPt, height: heightPt },
+      image,
+    };
+  }
+
+  addSignatureField(
+    doc,
+    {
+      reason: opts.reason,
+      location: opts.location,
+      contactInfo: opts.contactInfo,
+    },
+    visible,
+  );
 
   // Object streams MUST be off — placeholder bytes need to be findable in
   // the raw output, and stream compression would mask them.
-  let withPlaceholder: Uint8Array;
+  let incrementalBytes: Uint8Array;
   try {
-    withPlaceholder = await doc.save({ useObjectStreams: false });
+    incrementalBytes = await doc.saveIncremental(snapshot, {
+      useObjectStreams: false,
+    });
   } catch (err) {
-    throw new NodePdfError('READ_FAILED', 'Failed to serialize PDF', err);
+    throw new NodePdfError('READ_FAILED', 'Failed to serialize incremental update', err);
   }
 
-  // ---- 3. Locate placeholder + patch ByteRange ----------------------------
-  let buf = Buffer.from(withPlaceholder);
+  // ---- 3. Concatenate + locate placeholder + patch ByteRange --------------
+  // The full signed PDF = original bytes verbatim + the incremental section
+  // containing our new sig dict, widget, modified AcroForm/Page xref entries,
+  // and updated trailer. ByteRange will end up covering the whole thing
+  // except the Contents hex slot.
+  let buf = Buffer.concat([pdfBytes, Buffer.from(incrementalBytes)]);
   const { contentsStart, contentsEnd } = findContentsPlaceholder(buf);
   const byteRange: [number, number, number, number] = [
     0,
@@ -365,8 +680,9 @@ export async function signPdfDigitally(opts: SignDigitalOptions): Promise<void> 
   ]);
   let cms: Uint8Array;
   try {
-    cms = buildCmsSignature(cert, keyPem, signedContent);
+    cms = await buildCmsSignature(cert, keyPem, signedContent, opts.tsaUrl);
   } catch (err) {
+    if (err instanceof NodePdfError) throw err;
     throw new NodePdfError('READ_FAILED', 'Failed to build CMS signature', err);
   }
 

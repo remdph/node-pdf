@@ -165,6 +165,14 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
   // Fase 3: cryptographic signing dialog state.
   const [digitalSignOpen, setDigitalSignOpen] = useState(false);
   const [digitalSigning, setDigitalSigning] = useState(false);
+  // Fase 5a: when the user picks "visible appearance" in the digital-sign
+  // dialog, we close the dialog and arm a placement overlay. The pending
+  // signing parameters (cert + reason/etc) are stashed here until the user
+  // confirms placement on the page; then applyPlacement reads them and
+  // calls signDigital with the page+rect filled in.
+  const [pendingDigitalSign, setPendingDigitalSign] = useState<
+    Omit<SignDigitalInput, 'filePath' | 'pageIndex' | 'rect'> | null
+  >(null);
   const [placement, setPlacement] = useState<Placement | null>(null);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -956,15 +964,36 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     selectStamp(null);
     selectSignature(null);
     setPlacement(null);
+    // Also drop any half-armed digital sign — if the user backed out at the
+    // placement stage, they need to reopen the dialog to start over.
+    setPendingDigitalSign(null);
   }, [selectStamp, selectSignature]);
 
   const handleDigitalSign = useCallback(
-    async (input: Omit<SignDigitalInput, 'filePath'>) => {
+    async (input: Omit<SignDigitalInput, 'filePath' | 'pageIndex' | 'rect'>) => {
+      // Branch on visible vs invisible. For visible signatures we don't sign
+      // here — we stash the params, close the dialog, and select the visual
+      // signature so the placement overlay activates. applyPlacement reads
+      // pendingDigitalSign and routes to signDigital with the page+rect.
+      if (input.visualSignatureId) {
+        setPendingDigitalSign(input);
+        setDigitalSignOpen(false);
+        // Activating the visual signature shows the existing placement
+        // overlay UI — we get drag/resize + the action bar for free.
+        selectSignature(input.visualSignatureId);
+        return;
+      }
+
       setDigitalSigning(true);
       try {
         const result = await ipc.signatures.signDigital({
           filePath,
           ...input,
+          // Pass the unlocked password through for encrypted PDFs — the
+          // backend uses incremental update, so the original encrypted
+          // content stays intact; we just need the password to read the
+          // existing object table.
+          ...(unlockedPassword ? { password: unlockedPassword } : {}),
         });
         if (result.applied) {
           // Force a full reload so the signature panel + integrity status
@@ -980,7 +1009,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
         setDigitalSigning(false);
       }
     },
-    [filePath, activePage],
+    [filePath, activePage, selectSignature, unlockedPassword],
   );
 
   const applyPlacement = useCallback(async () => {
@@ -1014,25 +1043,44 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
 
     setApplying(true);
     try {
-      const applied = selectedStampId
-        ? (
-            await ipc.pdf.applyStamp({
-              filePath,
-              pageIndex: placement.pageIndex,
-              stampId: selectedStampId,
-              rect: normRect,
-              password: unlockedPassword ?? undefined,
-            })
-          ).applied
-        : (
-            await ipc.signatures.apply({
-              filePath,
-              pageIndex: placement.pageIndex,
-              signatureId: selectedSignatureId!,
-              rect: normRect,
-              password: unlockedPassword ?? undefined,
-            })
-          ).applied;
+      // Routing rules (mutually exclusive):
+      //   1. Pending digital sign + visual selected → signDigital with the
+      //      visualSignatureId + page + rect. Cryptographic + visible mark
+      //      in the same /Sig field.
+      //   2. Only stamp selected → applyStamp (Fase 0).
+      //   3. Only visual signature selected → signatures.apply (Fase 1).
+      let applied = false;
+      if (pendingDigitalSign && selectedSignatureId) {
+        applied = (
+          await ipc.signatures.signDigital({
+            ...pendingDigitalSign,
+            filePath,
+            pageIndex: placement.pageIndex,
+            rect: normRect,
+            password: unlockedPassword ?? undefined,
+          })
+        ).applied;
+      } else if (selectedStampId) {
+        applied = (
+          await ipc.pdf.applyStamp({
+            filePath,
+            pageIndex: placement.pageIndex,
+            stampId: selectedStampId,
+            rect: normRect,
+            password: unlockedPassword ?? undefined,
+          })
+        ).applied;
+      } else if (selectedSignatureId) {
+        applied = (
+          await ipc.signatures.apply({
+            filePath,
+            pageIndex: placement.pageIndex,
+            signatureId: selectedSignatureId,
+            rect: normRect,
+            password: unlockedPassword ?? undefined,
+          })
+        ).applied;
+      }
       if (applied) {
         restorePageRef.current = activePage;
         setRestoring(true);
@@ -1040,6 +1088,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
         selectStamp(null);
         selectSignature(null);
         setPlacement(null);
+        setPendingDigitalSign(null);
         setReloadKey((k) => k + 1);
       }
     } catch (err) {
@@ -1051,6 +1100,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     activePage,
     applying,
     filePath,
+    pendingDigitalSign,
     placement,
     selectSignature,
     selectStamp,
@@ -1468,13 +1518,16 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
               onClick={applyPlacement}
               disabled={applying}
             >
-              {applying
-                ? selectedSignatureId
-                  ? 'Signing…'
-                  : 'Applying…'
-                : selectedSignatureId
-                  ? 'Sign'
-                  : 'Apply'}
+              {(() => {
+                if (applying) {
+                  return pendingDigitalSign || selectedSignatureId
+                    ? 'Signing…'
+                    : 'Applying…';
+                }
+                if (pendingDigitalSign) return 'Sign digitally';
+                if (selectedSignatureId) return 'Sign';
+                return 'Apply';
+              })()}
             </button>
           </div>
         )}

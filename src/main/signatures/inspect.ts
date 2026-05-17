@@ -20,6 +20,7 @@ import type {
   SignatureTrustStatus,
 } from '~shared/types/signatures.js';
 
+import { checkOcsp } from './ocsp.js';
 import { verifyTrustChain } from './trust.js';
 
 interface SignatureField {
@@ -133,6 +134,10 @@ interface SignerInfo {
   signedAt: string | null;
   digestAlgorithm: string | null;
   embeddedDigest: Uint8Array | null;
+  /** The full cert chain pulled out of the CMS. Held internally so we can
+   * run OCSP later in inspectSignatures (we need both the signer cert and
+   * its issuer cert to compute the OCSP CertID). */
+  certChain: forge.pki.Certificate[];
   /** Result of cryptographically verifying the CMS signatureValue against
    * the signer cert's public key. Three states:
    *  - true:  RSA verify succeeded → signer cert's private key produced this
@@ -305,6 +310,7 @@ function parseCms(cms: Uint8Array): SignerInfo {
     validTo: null,
     trustStatus: 'unknown',
     trustedRootCN: null,
+    certChain: [],
   };
 
   // Trim trailing placeholder zero-padding so forge sees only the real DER.
@@ -405,6 +411,10 @@ function parseCms(cms: Uint8Array): SignerInfo {
     }
   }
   dbg('parseCms: certCount =', allCerts.length);
+
+  // Stash the full chain on the result so inspectSignatures can do OCSP
+  // (needs issuer cert) without re-parsing the CMS.
+  result.certChain = allCerts;
 
   // The leaf is conventionally certificates[0]; for full robustness we'd
   // match SignerInfo.sid (issuer + serial), but that's overkill for our
@@ -667,6 +677,7 @@ function parseLegacyRsaX509(
     validTo: null,
     trustStatus: 'unknown',
     trustedRootCN: null,
+    certChain: [],
   };
 
   // ---- collect cert DER bytes from /Cert -----------------------------
@@ -706,6 +717,8 @@ function parseLegacyRsaX509(
   }
   const cert = allCerts[0] ?? null;
   if (!cert) return result;
+
+  result.certChain = allCerts;
 
   // ---- populate metadata (same shape as the CMS path) ----------------
   const subjCN = cert.subject.getField('CN');
@@ -910,6 +923,7 @@ export async function inspectSignatures(
       validTo: null,
       trustStatus: 'unknown',
       trustedRootCN: null,
+    certChain: [],
     };
     // Branch on SubFilter: adbe.x509.rsa_sha1 is a pre-PKCS#7 format where
     // /Contents is a raw RSA signature and the cert is in /Cert — totally
@@ -971,6 +985,32 @@ export async function inspectSignatures(
     const expiredNow =
       Number.isFinite(vTo) ? now > vTo : null;
 
+    // Revocation (OCSP) — best-effort, may hit the network. Skip when:
+    //  - cert is self-signed (no responder to ask),
+    //  - cert chain has fewer than 2 entries (no issuer cert to build CertID),
+    //  - cert has no AIA OCSP URL (extractOcspUrl returns null inside).
+    let revocationStatus: ExistingSignatureInfo['revocationStatus'] = 'unchecked';
+    let revokedAt: string | undefined;
+    let revocationReason: string | undefined;
+    if (
+      !isSelfSigned &&
+      signerInfo.certChain.length >= 2
+    ) {
+      try {
+        const ocspResult = await checkOcsp({
+          cert: signerInfo.certChain[0]!,
+          issuerCert: signerInfo.certChain[1]!,
+        });
+        if (ocspResult) {
+          revocationStatus = ocspResult.status;
+          if (ocspResult.revokedAt) revokedAt = ocspResult.revokedAt;
+          if (ocspResult.revocationReason) revocationReason = ocspResult.revocationReason;
+        }
+      } catch {
+        // Network error / parse failure — stay 'unchecked'.
+      }
+    }
+
     result.push({
       fieldName,
       subFilter,
@@ -1003,6 +1043,9 @@ export async function inspectSignatures(
       expiredNow,
       trustStatus: signerInfo.trustStatus,
       trustedRootCN: signerInfo.trustedRootCN,
+      revocationStatus,
+      ...(revokedAt ? { revokedAt } : {}),
+      ...(revocationReason ? { revocationReason } : {}),
     });
   }
 

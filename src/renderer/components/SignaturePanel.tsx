@@ -134,6 +134,44 @@ function trustLine(sig: ExistingSignatureInfo): { text: string; color: string } 
   }
 }
 
+/** Render the OCSP revocation verdict. Four shapes — keep parallel to the
+ * other dimension renderers so the panel reads as one consistent story. */
+function revocationLine(sig: ExistingSignatureInfo): {
+  text: string;
+  color: string;
+} | null {
+  switch (sig.revocationStatus) {
+    case 'good':
+      return {
+        text: 'Revocation: cert is in good standing per OCSP responder',
+        color: '#4ade80',
+      };
+    case 'revoked': {
+      const parts = ['Revocation: cert was REVOKED'];
+      if (sig.revokedAt) {
+        try {
+          parts.push(`on ${new Date(sig.revokedAt).toLocaleDateString()}`);
+        } catch {
+          parts.push(`on ${sig.revokedAt}`);
+        }
+      }
+      if (sig.revocationReason) parts.push(`(${sig.revocationReason})`);
+      return { text: parts.join(' '), color: 'var(--danger)' };
+    }
+    case 'unknown':
+      return {
+        text: 'Revocation: OCSP responder didn’t recognize this cert',
+        color: '#facc15',
+      };
+    case 'unchecked':
+    default:
+      // Don't pollute the panel for cases where there was simply nothing to
+      // check (self-signed, no AIA URL, no network). Returning null hides
+      // the line entirely.
+      return null;
+  }
+}
+
 export function SignaturePanel({
   signatures,
   loading,
@@ -163,6 +201,7 @@ export function SignaturePanel({
           signatures.map((sig, idx) => {
             const temporal = temporalLine(sig);
             const trust = trustLine(sig);
+            const revocation = revocationLine(sig);
             return (
               <div className="signature-row" key={`${sig.fieldName}-${idx}`}>
                 <div className="signature-row-head">
@@ -211,6 +250,18 @@ export function SignaturePanel({
                         Expired
                       </span>
                     )}
+                    {sig.revocationStatus === 'revoked' && (
+                      <span
+                        className="signature-row-badge"
+                        style={{
+                          borderColor: 'rgba(255, 107, 107, 0.6)',
+                          color: 'var(--danger)',
+                        }}
+                        title="OCSP responder reports this cert was revoked by the CA"
+                      >
+                        Revoked
+                      </span>
+                    )}
                   </span>
                 </div>
                 <span className="signature-row-meta">
@@ -232,6 +283,14 @@ export function SignaturePanel({
                 >
                   {trust.text}
                 </span>
+                {revocation && (
+                  <span
+                    className="signature-row-meta"
+                    style={{ color: revocation.color }}
+                  >
+                    {revocation.text}
+                  </span>
+                )}
                 <span className="signature-row-meta">
                   Field: <strong>{sig.fieldName}</strong>
                 </span>

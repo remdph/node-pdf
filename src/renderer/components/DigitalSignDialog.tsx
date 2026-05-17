@@ -3,16 +3,26 @@ import { useEffect, useState } from 'react';
 import type { SignDigitalInput } from '~shared/types/signatures.js';
 
 import { useCertsStore } from '../stores/certs.js';
+import { useSettingsStore } from '../stores/settings.js';
+import { useSignaturesStore } from '../stores/signatures.js';
 import { CertificateManager } from './CertificateManager.js';
 
 interface DigitalSignDialogProps {
-  /** Pre-checked PDF path — caller has already validated it's not encrypted. */
+  /** PDF being signed. */
   filePath: string;
-  /** True if the PDF is currently encrypted; we disable signing in that
-   * case and show a helpful message. */
+  /** Informational only — encrypted PDFs are now supported via incremental
+   * update, but we still surface a note to set expectations. */
   isEncrypted: boolean;
   onClose(): void;
-  onSign(input: Omit<SignDigitalInput, 'filePath'>): Promise<void>;
+  /** Two modes:
+   *  - invisible (input.visualSignatureId omitted) → caller signs
+   *    immediately; the dialog stays open until the IPC returns.
+   *  - visible   (input.visualSignatureId set, pageIndex/rect omitted) →
+   *    caller closes the dialog and arms a page-placement overlay; the
+   *    actual signing happens once the user confirms placement.
+   * The parent decides what to do based on whether visualSignatureId is
+   * present in `input`. */
+  onSign(input: Omit<SignDigitalInput, 'filePath' | 'pageIndex' | 'rect'>): Promise<void>;
   /** Set while the sign IPC is in flight. */
   busy: boolean;
 }
@@ -27,6 +37,13 @@ export function DigitalSignDialog({
   const certs = useCertsStore((s) => s.certs);
   const loaded = useCertsStore((s) => s.loaded);
   const load = useCertsStore((s) => s.load);
+  const signatures = useSignaturesStore((s) => s.signatures);
+  const signaturesLoaded = useSignaturesStore((s) => s.loaded);
+  const loadSignatures = useSignaturesStore((s) => s.load);
+  const settings = useSettingsStore((s) => s.settings);
+  const settingsLoaded = useSettingsStore((s) => s.loaded);
+  const loadSettings = useSettingsStore((s) => s.load);
+  const updateSettings = useSettingsStore((s) => s.update);
 
   const [certId, setCertId] = useState<string>('');
   const [certPassword, setCertPassword] = useState('');
@@ -35,10 +52,36 @@ export function DigitalSignDialog({
   const [contactInfo, setContactInfo] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
+  // Visible-appearance toggle + pick. When empty, the signature is invisible
+  // (only shows in the viewer's Signatures panel).
+  const [visibleMode, setVisibleMode] = useState(false);
+  const [visualSignatureId, setVisualSignatureId] = useState<string>('');
+  // RFC 3161 TSA toggle. Off by default; once turned on we use the URL from
+  // settings (FreeTSA by default — see DEFAULT_SETTINGS in src/shared/types/settings).
+  const [useTimestamp, setUseTimestamp] = useState(false);
+  // Local editable copy of the TSA URL so the user can override the global
+  // setting just for this signing — the change persists to settings when
+  // they actually sign, not on every keystroke.
+  const [tsaUrlInput, setTsaUrlInput] = useState('');
 
   useEffect(() => {
     if (!loaded) void load();
   }, [loaded, load]);
+
+  useEffect(() => {
+    if (!signaturesLoaded) void loadSignatures();
+  }, [signaturesLoaded, loadSignatures]);
+
+  useEffect(() => {
+    if (!settingsLoaded) void loadSettings();
+  }, [settingsLoaded, loadSettings]);
+
+  // Seed the editable TSA URL from the persisted setting once loaded.
+  useEffect(() => {
+    if (settingsLoaded && !tsaUrlInput) {
+      setTsaUrlInput(settings.tsaUrl);
+    }
+  }, [settingsLoaded, settings.tsaUrl, tsaUrlInput]);
 
   // Auto-select the first cert once they're available.
   useEffect(() => {
@@ -46,6 +89,13 @@ export function DigitalSignDialog({
       setCertId(certs[0]!.id);
     }
   }, [certs, certId]);
+
+  // Auto-select the first visual signature when entering visible mode.
+  useEffect(() => {
+    if (visibleMode && !visualSignatureId && signatures.length > 0) {
+      setVisualSignatureId(signatures[0]!.id);
+    }
+  }, [visibleMode, visualSignatureId, signatures]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -66,13 +116,30 @@ export function DigitalSignDialog({
       setError('Certificate password is required');
       return;
     }
+    if (visibleMode && !visualSignatureId) {
+      setError(
+        'Pick a signature image, or uncheck "Add visible appearance" for an invisible signature',
+      );
+      return;
+    }
+    if (useTimestamp && !tsaUrlInput.trim()) {
+      setError('TSA URL is required when timestamping is enabled');
+      return;
+    }
     try {
+      // Persist the TSA URL if the user edited it — next signing will use
+      // the same value without re-prompting.
+      if (useTimestamp && tsaUrlInput.trim() !== settings.tsaUrl) {
+        await updateSettings({ tsaUrl: tsaUrlInput.trim() });
+      }
       await onSign({
         certId,
         certPassword,
         ...(reason.trim() ? { reason: reason.trim() } : {}),
         ...(location.trim() ? { location: location.trim() } : {}),
         ...(contactInfo.trim() ? { contactInfo: contactInfo.trim() } : {}),
+        ...(visibleMode && visualSignatureId ? { visualSignatureId } : {}),
+        ...(useTimestamp && tsaUrlInput.trim() ? { tsaUrl: tsaUrlInput.trim() } : {}),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -118,11 +185,11 @@ export function DigitalSignDialog({
             {isEncrypted && (
               <div
                 className="signature-editor-hint"
-                style={{ color: 'var(--danger)' }}
+                style={{ color: '#facc15' }}
               >
-                Cannot digitally sign an encrypted PDF in this version.
-                Remove the password (Protect dialog) first, sign, then
-                re-apply protection.
+                This PDF is password-protected. The signature will be
+                appended as an incremental update — the existing encrypted
+                content remains untouched and its protection stays intact.
               </div>
             )}
 
@@ -149,7 +216,7 @@ export function DigitalSignDialog({
                   className="signature-editor-select"
                   value={certId}
                   onChange={(e) => setCertId(e.target.value)}
-                  disabled={busy || isEncrypted}
+                  disabled={busy}
                   style={{ width: '100%' }}
                 >
                   {certs.map((c) => (
@@ -169,9 +236,9 @@ export function DigitalSignDialog({
                 className="signature-editor-input"
                 value={certPassword}
                 onChange={(e) => setCertPassword(e.target.value)}
-                disabled={busy || isEncrypted || certs.length === 0}
+                disabled={busy || certs.length === 0}
                 autoFocus
-                required={!isEncrypted && certs.length > 0}
+                required={certs.length > 0}
               />
             </label>
 
@@ -183,7 +250,7 @@ export function DigitalSignDialog({
                 placeholder="e.g. Approved by"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                disabled={busy || isEncrypted}
+                disabled={busy}
               />
             </label>
 
@@ -195,7 +262,7 @@ export function DigitalSignDialog({
                 placeholder="e.g. Madrid"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
-                disabled={busy || isEncrypted}
+                disabled={busy}
               />
             </label>
 
@@ -207,9 +274,100 @@ export function DigitalSignDialog({
                 placeholder="e.g. email"
                 value={contactInfo}
                 onChange={(e) => setContactInfo(e.target.value)}
-                disabled={busy || isEncrypted}
+                disabled={busy}
               />
             </label>
+
+            <div className="cert-field">
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={visibleMode}
+                  onChange={(e) => setVisibleMode(e.target.checked)}
+                  disabled={busy}
+                />
+                <span style={{ fontSize: '0.85rem', color: 'var(--fg)' }}>
+                  Add visible appearance on the page
+                </span>
+              </label>
+              {visibleMode && (
+                signatures.length === 0 ? (
+                  <div
+                    className="signature-editor-hint"
+                    style={{ color: '#facc15' }}
+                  >
+                    No saved signatures. Create one via the Signatures button
+                    (cursive icon) in the toolbar first.
+                  </div>
+                ) : (
+                  <select
+                    className="signature-editor-select"
+                    value={visualSignatureId}
+                    onChange={(e) => setVisualSignatureId(e.target.value)}
+                    disabled={busy}
+                    style={{ width: '100%', marginTop: '0.4rem' }}
+                  >
+                    {signatures.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.label} ({s.kind})
+                      </option>
+                    ))}
+                  </select>
+                )
+              )}
+              {visibleMode && (
+                <div className="signature-editor-hint" style={{ marginTop: '0.3rem' }}>
+                  After clicking Continue, drag/resize the signature on the
+                  current page, then confirm.
+                </div>
+              )}
+            </div>
+
+            <div className="cert-field">
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={useTimestamp}
+                  onChange={(e) => setUseTimestamp(e.target.checked)}
+                  disabled={busy}
+                />
+                <span style={{ fontSize: '0.85rem', color: 'var(--fg)' }}>
+                  Add trusted timestamp (PAdES-T)
+                </span>
+              </label>
+              {useTimestamp && (
+                <>
+                  <input
+                    type="url"
+                    className="signature-editor-input"
+                    placeholder="https://freetsa.org/tsr"
+                    value={tsaUrlInput}
+                    onChange={(e) => setTsaUrlInput(e.target.value)}
+                    disabled={busy}
+                    style={{ marginTop: '0.4rem' }}
+                  />
+                  <div className="signature-editor-hint" style={{ marginTop: '0.3rem' }}>
+                    Contacts an RFC 3161 Timestamp Authority. Keeps the
+                    signature verifiable after the cert expires. Requires
+                    internet access at sign time.
+                  </div>
+                </>
+              )}
+            </div>
 
             {error && (
               <div className="signature-editor-hint" style={{ color: 'var(--danger)' }}>
@@ -229,9 +387,18 @@ export function DigitalSignDialog({
               <button
                 type="submit"
                 className="signature-editor-btn is-primary"
-                disabled={busy || isEncrypted || certs.length === 0 || !certId}
+                disabled={
+                  busy ||
+                  certs.length === 0 ||
+                  !certId ||
+                  (visibleMode && (!visualSignatureId || signatures.length === 0))
+                }
               >
-                {busy ? 'Signing…' : 'Sign'}
+                {busy
+                  ? 'Signing…'
+                  : visibleMode
+                    ? 'Continue to place'
+                    : 'Sign'}
               </button>
             </div>
           </form>
