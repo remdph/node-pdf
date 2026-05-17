@@ -2394,3 +2394,580 @@ button.primary:hover {
 .small {
   font-size: 0.85rem;
 }
+
+/* --- Handwriting fonts (typed signatures) ------------------------------ */
+/* Bundled offline so typed signatures render consistently in air-gapped /
+ * packaged installs. All three are OFL-licensed (SIL Open Font License). */
+@font-face {
+  font-family: 'Caveat';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+  src: url('../assets/fonts/Caveat-Regular.ttf') format('truetype-variations');
+}
+
+@font-face {
+  font-family: 'Dancing Script';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+  src: url('../assets/fonts/DancingScript-Regular.ttf') format('truetype-variations');
+}
+
+@font-face {
+  font-family: 'Great Vibes';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('../assets/fonts/GreatVibes-Regular.ttf') format('truetype');
+}
+
+/* --- Signatures menu (popover) ----------------------------------------- */
+/* Same layout as .stamps-menu but a touch wider to fit the longer labels
+ * we get from drawn/typed signatures (the kind chip + multi-word names). */
+.signatures-menu {
+  position: fixed;
+  z-index: 50;
+  width: 360px;
+  max-height: 460px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.signatures-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.signatures-menu-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.signatures-menu-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.signatures-menu-action {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  border-radius: 5px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.signatures-menu-action:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.signatures-menu-empty {
+  padding: 1.25rem 0.75rem;
+  text-align: center;
+}
+
+.signatures-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  overflow-y: auto;
+}
+
+.signature-chip {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: 100%;
+  min-height: 100px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.signature-chip:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.signature-chip:focus,
+.signature-chip:focus-visible {
+  outline: none;
+}
+
+.signature-chip-img {
+  max-width: 100%;
+  max-height: 70px;
+  object-fit: contain;
+  pointer-events: none;
+  /* signatures are normally white-ink on transparent — the checkerboard
+   * makes that visible against the dark menu surface. */
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.08) 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+
+.signature-chip-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+}
+
+.signature-chip-label {
+  font-size: 0.72rem;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.signature-chip-kind {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  opacity: 0.7;
+}
+
+.signature-chip-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease;
+  font: 700 14px/1 ui-sans-serif, system-ui, sans-serif;
+  padding: 0;
+  line-height: 1;
+}
+
+.signature-chip:hover .signature-chip-remove,
+.signature-chip:focus-within .signature-chip-remove {
+  opacity: 1;
+}
+
+.signature-chip-remove:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* --- Signature overlay (same shape as .stamp-overlay) ------------------ */
+.signature-overlay {
+  z-index: 5;
+  outline: 2px dashed var(--accent);
+  outline-offset: -1px;
+  background: transparent;
+}
+
+.signature-overlay-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* --- Signature editor (modal) ------------------------------------------ */
+.signature-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.signature-editor {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  width: 560px;
+  max-width: calc(100vw - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.signature-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.signature-editor-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.signature-editor-close {
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+}
+
+.signature-editor-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+}
+
+.signature-editor-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+
+.signature-editor-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-muted);
+  padding: 0.7rem 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.signature-editor-tab:hover {
+  color: var(--fg);
+}
+
+.signature-editor-tab.is-active {
+  color: var(--accent-hover);
+  border-bottom-color: var(--accent);
+}
+
+.signature-editor-body {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.signature-editor-canvas {
+  width: 100%;
+  height: 200px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: crosshair;
+  /* signatures should remain crisp on hidpi — canvas owns its own pixel
+   * ratio; CSS just stretches it. */
+  display: block;
+  touch-action: none;
+}
+
+.signature-editor-typed-preview {
+  width: 100%;
+  height: 200px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 1rem;
+}
+
+.signature-editor-typed-preview-text {
+  font-size: 3.5rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.signature-editor-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.signature-editor-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.4rem 0.6rem;
+  color: var(--fg);
+  font-size: 0.85rem;
+}
+
+.signature-editor-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.signature-editor-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.4rem 0.6rem;
+  color: var(--fg);
+  font-size: 0.85rem;
+}
+
+.signature-editor-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.signature-editor-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 0.45rem 0.9rem;
+  border-radius: 5px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.signature-editor-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-hover);
+}
+
+.signature-editor-btn.is-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #111;
+}
+
+.signature-editor-btn.is-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.signature-editor-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.signature-editor-hint {
+  color: var(--fg-muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+/* --- Right-side panel (signatures + future use cases) ------------------ */
+.side-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateX(100%);
+  transition: transform 0.18s ease;
+}
+
+.side-panel.is-open {
+  transform: translateX(0);
+}
+
+.side-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.side-panel-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.side-panel-close {
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 1.15rem;
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+}
+
+.side-panel-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+}
+
+.side-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+/* --- Signature panel rows ---------------------------------------------- */
+.signature-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  margin-bottom: 0.5rem;
+}
+
+.signature-row-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.signature-row-status {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.signature-row-status.is-untampered {
+  background: #4ade80;
+}
+
+.signature-row-status.is-modified-after {
+  background: #facc15;
+}
+
+.signature-row-status.is-invalid {
+  background: var(--danger);
+}
+
+.signature-row-status.is-unknown {
+  background: var(--fg-muted);
+}
+
+.signature-row-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signature-row-meta {
+  font-size: 0.74rem;
+  color: var(--fg-muted);
+}
+
+.signature-row-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--fg-muted);
+}
+
+/* --- Status-bar signed indicator --------------------------------------- */
+.status-signed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  color: #4ade80;
+  font-size: 0.72rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.status-signed.is-warn {
+  background: rgba(250, 204, 21, 0.12);
+  border-color: rgba(250, 204, 21, 0.4);
+  color: #facc15;
+}
+
+.status-signed.is-bad {
+  background: rgba(255, 107, 107, 0.14);
+  border-color: rgba(255, 107, 107, 0.4);
+  color: var(--danger);
+}

@@ -9,15 +9,19 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 
 import { ipc } from '../lib/ipc.js';
 import { ZOOM_DEFAULT, ZOOM_STEP, clampZoom } from '../lib/zoom.js';
+import { useSignaturesStore } from '../stores/signatures.js';
 import { useStampsStore } from '../stores/stamps.js';
 import { useTabsStore } from '../stores/tabs.js';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import type { ProtectInput } from '~shared/types/ipc.js';
+import type { ExistingSignatureInfo } from '~shared/types/signatures.js';
 
 import { PasswordDialog } from './PasswordDialog.js';
 import { PrintDialog } from './PrintDialog.js';
 import { ProtectDialog } from './ProtectDialog.js';
+import { SignaturePanel } from './SignaturePanel.js';
+import { SignaturesMenu } from './SignaturesMenu.js';
 import { StampsMenu } from './StampsMenu.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -141,12 +145,19 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
 
   const selectedStampId = useStampsStore((s) => s.selectedId);
   const selectStamp = useStampsStore((s) => s.select);
+  const selectedSignatureId = useSignaturesStore((s) => s.selectedId);
+  const selectSignature = useSignaturesStore((s) => s.select);
 
   const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
   const [numPages, setNumPages] = useState(0);
   const [activePage, setActivePage] = useState(1);
   const [reloadKey, setReloadKey] = useState(0);
   const [stampMenuAnchor, setStampMenuAnchor] = useState<HTMLElement | null>(null);
+  const [signatureMenuAnchor, setSignatureMenuAnchor] = useState<HTMLElement | null>(null);
+  // Fase 2: existing /Sig fields found in the current PDF + the side panel.
+  const [existingSignatures, setExistingSignatures] = useState<ExistingSignatureInfo[]>([]);
+  const [signaturesLoading, setSignaturesLoading] = useState(false);
+  const [signaturePanelOpen, setSignaturePanelOpen] = useState(false);
   const [placement, setPlacement] = useState<Placement | null>(null);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -207,6 +218,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
   } | null>(null);
 
   const stampBtnRef = useRef<HTMLButtonElement>(null);
+  const signatureBtnRef = useRef<HTMLButtonElement>(null);
   const [pagesEl, setPagesEl] = useState<HTMLElement | null>(null);
   const pagesVirtuosoRef = useRef<VirtuosoHandle>(null);
   const thumbsVirtuosoRef = useRef<VirtuosoHandle>(null);
@@ -314,7 +326,40 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     setSearchMatches([]);
     setSearchIdx(-1);
     lastSearchedRef.current = '';
+    // Existing-signatures cache is per-file; clear it and let the inspect
+    // effect below re-populate when the file is ready.
+    setExistingSignatures([]);
+    setSignaturePanelOpen(false);
   }, [filePath]);
+
+  // Inspect existing /Sig fields for the current document. Triggers on file
+  // load and whenever the on-disk bytes change (reloadKey ticks after our
+  // own write operations) so the panel reflects newly-applied signatures
+  // once Fase 3 lands. Encryption-aware: we wait until we have the password
+  // before inspecting an encrypted PDF so signer attributes parse cleanly.
+  useEffect(() => {
+    if (load.kind !== 'ready') return;
+    if (isEncrypted && !unlockedPassword) return;
+    let cancelled = false;
+    setSignaturesLoading(true);
+    ipc.signatures
+      .inspect(filePath, unlockedPassword ?? undefined)
+      .then((result) => {
+        if (cancelled) return;
+        setExistingSignatures(result.signatures);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn('[PdfView] signatures.inspect failed', err);
+        setExistingSignatures([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSignaturesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filePath, reloadKey, load.kind, isEncrypted, unlockedPassword]);
 
   // Auto-open the outline panel the first time we discover a doc has one,
   // but only if the side panel is currently collapsed — never override an
@@ -704,9 +749,14 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
   // When the user picks a stamp, anchor placement on the currently visible page.
   useEffect(() => {
     if (!selectedStampId) {
-      setPlacement(null);
+      // Only clear placement if the cause is "no stamp AND no signature";
+      // otherwise the signature effect owns it.
+      if (!selectedSignatureId) setPlacement(null);
       return;
     }
+    // Stamps and signatures share the placement state — selecting a stamp
+    // clears any armed signature so the overlay routes to the stamp.
+    if (selectedSignatureId) selectSignature(null);
     const idx = activePage - 1;
     pagesVirtuosoRef.current?.scrollToIndex({ index: idx, align: 'start' });
 
@@ -752,6 +802,63 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStampId]);
+
+  // Same flow for signatures: arms the placement overlay using the signature
+  // image's intrinsic aspect ratio. Wider default (60% of page) since visual
+  // signatures are typically taller-than-wide and read better when bigger.
+  useEffect(() => {
+    if (!selectedSignatureId) {
+      if (!selectedStampId) setPlacement(null);
+      return;
+    }
+    if (selectedStampId) selectStamp(null);
+    const idx = activePage - 1;
+    pagesVirtuosoRef.current?.scrollToIndex({ index: idx, align: 'start' });
+
+    let cancelled = false;
+    const tryInit = (attempts: number) => {
+      const pageEl = pageRefs.current[idx];
+      if (!pageEl || pageEl.clientWidth === 0) {
+        if (attempts >= 10) {
+          console.error('[PdfView] could not measure page for signature placement');
+          return;
+        }
+        requestAnimationFrame(() => !cancelled && tryInit(attempts + 1));
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        const pw = pageEl.clientWidth;
+        const ph = pageEl.clientHeight;
+        const ratio = img.naturalWidth / img.naturalHeight || 1;
+        // Signatures default a bit smaller than stamps — typically placed
+        // inline next to a printed name rather than as a page-spanning mark.
+        const w = Math.min(STAMP_INIT_MAX_W, pw * 0.35);
+        const h = w / ratio;
+        setPlacement({
+          pageIndex: idx,
+          rect: {
+            x: Math.max(0, (pw - w) / 2),
+            y: Math.max(0, Math.min(ph - h - 40, ph - h - 40)),
+            w,
+            h,
+          },
+        });
+      };
+      img.onerror = () => {
+        if (cancelled) return;
+        console.error('[PdfView] failed to load signature image for placement');
+      };
+      img.src = `signature://${selectedSignatureId}`;
+    };
+    requestAnimationFrame(() => !cancelled && tryInit(0));
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSignatureId]);
 
   // Generate a hidden JPEG sibling of the PDF (`.<name>.thumb.jpg`) when the
   // first page renders. The recents carousel uses it as a fast-path; without
@@ -840,11 +947,13 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
 
   const cancelPlacement = useCallback(() => {
     selectStamp(null);
+    selectSignature(null);
     setPlacement(null);
-  }, [selectStamp]);
+  }, [selectStamp, selectSignature]);
 
   const applyPlacement = useCallback(async () => {
-    if (!placement || !selectedStampId || applying) return;
+    if (!placement || applying) return;
+    if (!selectedStampId && !selectedSignatureId) return;
 
     let pageEl = pageRefs.current[placement.pageIndex];
     if (!pageEl) {
@@ -864,32 +973,45 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     const ph = pageEl.clientHeight;
     if (!pw || !ph) return;
 
+    const normRect = {
+      x: placement.rect.x / pw,
+      y: placement.rect.y / ph,
+      w: placement.rect.w / pw,
+      h: placement.rect.h / ph,
+    };
+
     setApplying(true);
     try {
-      const result = await ipc.pdf.applyStamp({
-        filePath,
-        pageIndex: placement.pageIndex,
-        stampId: selectedStampId,
-        rect: {
-          x: placement.rect.x / pw,
-          y: placement.rect.y / ph,
-          w: placement.rect.w / pw,
-          h: placement.rect.h / ph,
-        },
-        password: unlockedPassword ?? undefined,
-      });
-      if (result.applied) {
+      const applied = selectedStampId
+        ? (
+            await ipc.pdf.applyStamp({
+              filePath,
+              pageIndex: placement.pageIndex,
+              stampId: selectedStampId,
+              rect: normRect,
+              password: unlockedPassword ?? undefined,
+            })
+          ).applied
+        : (
+            await ipc.signatures.apply({
+              filePath,
+              pageIndex: placement.pageIndex,
+              signatureId: selectedSignatureId!,
+              rect: normRect,
+              password: unlockedPassword ?? undefined,
+            })
+          ).applied;
+      if (applied) {
         restorePageRef.current = activePage;
         setRestoring(true);
-        // Stale snapshots show the OLD content embedded; clear so we don't
-        // briefly flash pre-stamp state during the reload.
         snapshotCacheRef.current?.clear();
         selectStamp(null);
+        selectSignature(null);
         setPlacement(null);
         setReloadKey((k) => k + 1);
       }
     } catch (err) {
-      console.error('[PdfView] applyStamp failed', err);
+      console.error('[PdfView] applyPlacement failed', err);
     } finally {
       setApplying(false);
     }
@@ -898,7 +1020,9 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     applying,
     filePath,
     placement,
+    selectSignature,
     selectStamp,
+    selectedSignatureId,
     selectedStampId,
     unlockedPassword,
   ]);
@@ -1140,6 +1264,22 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
             <SignatureIcon />
           </button>
           <button
+            ref={signatureBtnRef}
+            type="button"
+            className={`pdf-tool${
+              signatureMenuAnchor || selectedSignatureId ? ' pdf-tool-active' : ''
+            }`}
+            onClick={() =>
+              setSignatureMenuAnchor((cur) => (cur ? null : signatureBtnRef.current))
+            }
+            aria-label="Signatures"
+            aria-pressed={!!signatureMenuAnchor}
+            title="Signatures"
+            disabled={!isReady}
+          >
+            <SignaturePenIcon />
+          </button>
+          <button
             type="button"
             className={`pdf-tool${printOpen ? ' pdf-tool-active' : ''}`}
             onClick={() => setPrintOpen(true)}
@@ -1257,6 +1397,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
                   size={pageSizes[index]}
                   placement={placement}
                   selectedStampId={selectedStampId}
+                  selectedSignatureId={selectedSignatureId}
                   onPlacementChange={setPlacement}
                   cacheRef={snapshotCacheRef}
                   observer={pageObserver}
@@ -1269,7 +1410,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
           </Document>
         )}
 
-        {placement && selectedStampId && (
+        {placement && (selectedStampId || selectedSignatureId) && (
           <div className="stamp-action-bar">
             <button type="button" onClick={cancelPlacement} disabled={applying}>
               Cancel
@@ -1280,7 +1421,13 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
               onClick={applyPlacement}
               disabled={applying}
             >
-              {applying ? 'Applying…' : 'Apply'}
+              {applying
+                ? selectedSignatureId
+                  ? 'Signing…'
+                  : 'Applying…'
+                : selectedSignatureId
+                  ? 'Sign'
+                  : 'Apply'}
             </button>
           </div>
         )}
@@ -1296,6 +1443,32 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
             <span aria-hidden>—</span>
           )}
         </span>
+        {existingSignatures.length > 0 && (
+          <>
+            <span className="pdf-status-sep" aria-hidden />
+            <span
+              className={`status-signed${
+                existingSignatures.some((s) => s.integrity === 'invalid')
+                  ? ' is-bad'
+                  : existingSignatures.some((s) => s.integrity === 'modified-after')
+                    ? ' is-warn'
+                    : ''
+              }`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setSignaturePanelOpen((v) => !v)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSignaturePanelOpen((v) => !v);
+                }
+              }}
+              title="Show signature details"
+            >
+              Signed ({existingSignatures.length})
+            </span>
+          </>
+        )}
         <span className="pdf-status-spacer" aria-hidden />
         <span className="pdf-status-item" title="Zoom level">
           {Math.round(zoom * 100)}%
@@ -1306,11 +1479,27 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
         </span>
       </div>
 
+      {signaturePanelOpen && (
+        <SignaturePanel
+          signatures={existingSignatures}
+          loading={signaturesLoading}
+          onClose={() => setSignaturePanelOpen(false)}
+        />
+      )}
+
       {stampMenuAnchor && (
         <StampsMenu
           anchor={stampMenuAnchor}
           onClose={() => setStampMenuAnchor(null)}
           onSelect={(id) => selectStamp(id)}
+        />
+      )}
+
+      {signatureMenuAnchor && (
+        <SignaturesMenu
+          anchor={signatureMenuAnchor}
+          onClose={() => setSignatureMenuAnchor(null)}
+          onSelect={(id) => selectSignature(id)}
         />
       )}
 
@@ -1382,6 +1571,7 @@ interface PageItemProps {
   size: PageSize | undefined;
   placement: Placement | null;
   selectedStampId: string | null;
+  selectedSignatureId: string | null;
   onPlacementChange: React.Dispatch<React.SetStateAction<Placement | null>>;
   cacheRef: React.MutableRefObject<SnapshotCache | null>;
   observer: IntersectionObserver | null;
@@ -1401,6 +1591,7 @@ function PageItem({
   size,
   placement,
   selectedStampId,
+  selectedSignatureId,
   onPlacementChange,
   cacheRef,
   observer,
@@ -1518,13 +1709,13 @@ function PageItem({
           ) : null
         }
       />
-      {placement?.pageIndex === index && selectedStampId && (
+      {placement?.pageIndex === index && (selectedStampId || selectedSignatureId) && (
         <Rnd
           size={{ width: placement.rect.w, height: placement.rect.h }}
           position={{ x: placement.rect.x, y: placement.rect.y }}
           bounds="parent"
           lockAspectRatio
-          className="stamp-overlay"
+          className={selectedSignatureId ? 'signature-overlay' : 'stamp-overlay'}
           onDragStop={(_, d) =>
             onPlacementChange((p) =>
               p ? { ...p, rect: { ...p.rect, x: d.x, y: d.y } } : p,
@@ -1547,9 +1738,15 @@ function PageItem({
           }
         >
           <img
-            src={`stamp://${selectedStampId}`}
+            src={
+              selectedSignatureId
+                ? `signature://${selectedSignatureId}`
+                : `stamp://${selectedStampId}`
+            }
             alt=""
-            className="stamp-overlay-img"
+            className={
+              selectedSignatureId ? 'signature-overlay-img' : 'stamp-overlay-img'
+            }
             draggable={false}
           />
         </Rnd>
@@ -1814,6 +2011,34 @@ function SignatureIcon(): JSX.Element {
         strokeLinejoin="round"
       />
       <path d="M2 15h14" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity="0.55" />
+    </svg>
+  );
+}
+
+/** Fountain-pen mark — visually distinct from the cursive squiggle used by
+ * the Stamps button so the two adjacent toolbar slots aren't ambiguous. */
+function SignaturePenIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <path
+        d="M11.5 2.5 15 6l-7.5 7.5L4 14l.5-3.5z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m11.5 2.5 1.5-1.5 2.5 2.5L14 5"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2 16h14"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+        opacity="0.55"
+      />
     </svg>
   );
 }

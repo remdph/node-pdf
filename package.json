@@ -15,7 +15,8 @@
   "packageManager": "pnpm@11.1.1",
   "scripts": {
     "start": "electron-forge start",
-    "dev": "electron-forge start",
+    "dev": "bash scripts/dev-wayland.sh",
+    "dev:auto": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
@@ -26,6 +27,7 @@
   "dependencies": {
     "@cantoo/pdf-lib": "^2.6.5",
     "electron-squirrel-startup": "^1.0.1",
+    "node-forge": "^1.4.0",
     "pdfjs-dist": "5.4.296",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -57,6 +59,7 @@
     "@electron/notarize": "^3.1.1",
     "@reforged/maker-appimage": "^5.2.0",
     "@types/node": "^22.7.5",
+    "@types/node-forge": "^1.3.14",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "@typescript-eslint/eslint-plugin": "^8.8.1",

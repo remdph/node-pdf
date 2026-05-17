@@ -5,6 +5,7 @@ import { registerFileAssociations } from './file-association.js';
 import { registerAllIpc } from './ipc/index.js';
 import { addPendingFile, deliverFileToRenderer } from './ipc/pdf.js';
 import { buildApplicationMenu } from './menu.js';
+import { registerSignatureProtocol, registerSignatureScheme } from './signatures/protocol.js';
 import { registerStampProtocol, registerStampScheme } from './stamps/protocol.js';
 
 // Windows installer entry; resolves before app is "ready" when Squirrel kicks in.
@@ -75,6 +76,7 @@ if (app.isPackaged) {
 // NODEPDF_SCALE remains an explicit override for either session type.
 // Privileged scheme registration MUST happen before app is ready.
 registerStampScheme();
+registerSignatureScheme();
 
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
@@ -101,6 +103,7 @@ if (process.platform === 'linux') {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(buildApplicationMenu());
   registerStampProtocol();
+  registerSignatureProtocol();
   registerAllIpc();
   // Best-effort PDF handler registration on Win/Linux (macOS handles
   // this declaratively via Info.plist).

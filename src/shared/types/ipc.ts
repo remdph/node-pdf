@@ -1,3 +1,11 @@
+import type { AppSettings } from './settings.js';
+import type {
+  ApplySignatureInput,
+  ApplySignatureResult,
+  CreateSignatureFromBytesInput,
+  InspectSignaturesResult,
+  Signature,
+} from './signatures.js';
 import type { ApplyStampInput, ApplyStampResult, Stamp } from './stamps.js';
 
 export interface PrinterInfo {
@@ -89,6 +97,19 @@ export interface IpcApi {
     add(): Promise<Stamp | null>;
     remove(id: string): Promise<void>;
   };
+  signatures: {
+    list(): Promise<Signature[]>;
+    /** Persist a drawn or typed signature produced by a renderer canvas. */
+    createFromBytes(input: CreateSignatureFromBytesInput): Promise<Signature>;
+    /** Open the OS file picker and import a PNG/JPG as a signature image. */
+    createFromFile(): Promise<Signature | null>;
+    remove(id: string): Promise<void>;
+    /** Apply a visual signature to a page (does NOT add a cryptographic
+     * /Sig field — that's Fase 3). */
+    apply(input: ApplySignatureInput): Promise<ApplySignatureResult>;
+    /** Inspect existing /Sig fields in a PDF and report their integrity. */
+    inspect(filePath: string, password?: string): Promise<InspectSignaturesResult>;
+  };
   recents: {
     readThumb(filePath: string): Promise<Uint8Array | null>;
     saveThumb(input: { filePath: string; bytes: Uint8Array }): Promise<void>;
@@ -96,6 +117,12 @@ export interface IpcApi {
   shell: {
     /** List of common home subdirectories that exist on this machine. */
     homeFolders(): Promise<HomeFolder[]>;
+  };
+  settings: {
+    get(): Promise<AppSettings>;
+    /** Partial patch — unspecified keys keep their current value. Returns
+     * the merged settings so the renderer can reconcile its own store. */
+    set(patch: Partial<AppSettings>): Promise<AppSettings>;
   };
 }
 
@@ -125,6 +152,14 @@ export const IPC_CHANNELS = {
     add: 'stamps:add',
     remove: 'stamps:remove',
   },
+  signatures: {
+    list: 'signatures:list',
+    createFromBytes: 'signatures:create-from-bytes',
+    createFromFile: 'signatures:create-from-file',
+    remove: 'signatures:remove',
+    apply: 'signatures:apply',
+    inspect: 'signatures:inspect',
+  },
   recents: {
     readThumb: 'recents:read-thumb',
     saveThumb: 'recents:save-thumb',
@@ -134,5 +169,9 @@ export const IPC_CHANNELS = {
   },
   shell: {
     homeFolders: 'shell:home-folders',
+  },
+  settings: {
+    get: 'settings:get',
+    set: 'settings:set',
   },
 } as const;

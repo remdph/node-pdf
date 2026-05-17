@@ -7,12 +7,13 @@ import { PDFDocument } from '@cantoo/pdf-lib';
 import { NodePdfError } from '~shared/types/errors.js';
 import { IPC_CHANNELS } from '~shared/types/ipc.js';
 import type {
-  PdfPermissions,
   PrinterInfo,
   PrintOptions,
   ProtectInput,
 } from '~shared/types/ipc.js';
 import type { ApplyStampInput, ApplyStampResult } from '~shared/types/stamps.js';
+import { embedImageOnPage } from '../pdf/embed.js';
+import { toPdfLibPermissions, type PdfDocumentLike } from '../pdf/encryption.js';
 import { findStamp } from '../stamps/storage.js';
 import { handle } from './register.js';
 
@@ -32,30 +33,6 @@ export function deliverFileToRenderer(filePath: string): boolean {
   if (!win || win.webContents.isLoading()) return false;
   win.webContents.send(IPC_CHANNELS.pdf.openExternal, filePath);
   return true;
-}
-
-/** Map our user-friendly permission flags to the shape pdf-lib's `encrypt`
- * expects. We grant the unspecified-but-related capabilities by default
- * (e.g. content accessibility is always on so screen readers work). */
-function toPdfLibPermissions(p: PdfPermissions | undefined): Record<string, unknown> {
-  const all = !p; // undefined → grant everything
-  return {
-    printing: all || p?.printing ? 'highResolution' : false,
-    modifying: all || (p?.modifying ?? false),
-    copying: all || (p?.copying ?? false),
-    annotating: all || (p?.annotating ?? false),
-    fillingForms: all || (p?.modifying ?? false),
-    documentAssembly: all || (p?.modifying ?? false),
-    contentAccessibility: true,
-  };
-}
-
-interface PdfDocumentLike {
-  encrypt: (opts: {
-    userPassword: string;
-    ownerPassword: string;
-    permissions?: Record<string, unknown>;
-  }) => void;
 }
 
 const PDF_MAGIC = Buffer.from('%PDF-', 'ascii');
@@ -162,72 +139,14 @@ export function registerPdfIpc(): void {
 
       if (confirm.response !== 1) return { applied: false };
 
-      let pdfBytes: Buffer;
-      try {
-        pdfBytes = await fs.readFile(filePath);
-      } catch (err) {
-        throw new NodePdfError('READ_FAILED', `Failed to read PDF: ${filePath}`, err);
-      }
-
-      let doc: PDFDocument;
-      try {
-        // Pass the password through so encrypted PDFs can be modified.
-        doc = await PDFDocument.load(
-          pdfBytes,
-          password ? { password } : undefined,
-        );
-      } catch (err) {
-        throw new NodePdfError('INVALID_PDF', 'PDF could not be parsed', err);
-      }
-
-      const pages = doc.getPages();
-      if (pageIndex >= pages.length) {
-        throw new NodePdfError('VALIDATION_ERROR', 'Page index out of range');
-      }
-      const page = pages[pageIndex];
-      if (!page) {
-        throw new NodePdfError('VALIDATION_ERROR', 'Page not found');
-      }
-      const { width: pageW, height: pageH } = page.getSize();
-
-      const stampBytes = new Uint8Array(found.bytes);
-      const image =
-        found.stamp.ext === 'png'
-          ? await doc.embedPng(stampBytes)
-          : await doc.embedJpg(stampBytes);
-
-      const drawW = rect.w * pageW;
-      const drawH = rect.h * pageH;
-      const drawX = rect.x * pageW;
-      // PDF coords have origin at bottom-left; the renderer uses top-left.
-      const drawY = pageH - rect.y * pageH - drawH;
-
-      page.drawImage(image, { x: drawX, y: drawY, width: drawW, height: drawH });
-
-      // Re-encrypt with the same password so the modified PDF stays
-      // protected. v1 caveat: original permissions are NOT preserved — we
-      // re-grant the default broad set.
-      let outBytes: Uint8Array;
-      try {
-        if (password) {
-          (doc as unknown as PdfDocumentLike).encrypt({
-            userPassword: password,
-            ownerPassword: password,
-            permissions: toPdfLibPermissions(undefined),
-          });
-          outBytes = await doc.save({ useObjectStreams: false });
-        } else {
-          outBytes = await doc.save();
-        }
-      } catch (err) {
-        throw new NodePdfError('READ_FAILED', 'Failed to serialize PDF', err);
-      }
-
-      try {
-        await fs.writeFile(filePath, outBytes);
-      } catch (err) {
-        throw new NodePdfError('READ_FAILED', `Failed to write PDF: ${filePath}`, err);
-      }
+      await embedImageOnPage({
+        filePath,
+        pageIndex,
+        rect,
+        imageBytes: new Uint8Array(found.bytes),
+        imageFormat: found.stamp.ext,
+        password,
+      });
 
       return { applied: true };
     },

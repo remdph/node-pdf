@@ -8,6 +8,14 @@ import type {
   PrintOptions,
   ProtectInput,
 } from '~shared/types/ipc.js';
+import type { AppSettings } from '~shared/types/settings.js';
+import type {
+  ApplySignatureInput,
+  ApplySignatureResult,
+  CreateSignatureFromBytesInput,
+  InspectSignaturesResult,
+  Signature,
+} from '~shared/types/signatures.js';
 import type { ApplyStampInput, ApplyStampResult, Stamp } from '~shared/types/stamps.js';
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -60,6 +68,18 @@ const api = {
     add: () => invoke<Stamp | null>(IPC_CHANNELS.stamps.add),
     remove: (id: string) => invoke<void>(IPC_CHANNELS.stamps.remove, id),
   },
+  signatures: {
+    list: () => invoke<Signature[]>(IPC_CHANNELS.signatures.list),
+    createFromBytes: (input: CreateSignatureFromBytesInput) =>
+      invoke<Signature>(IPC_CHANNELS.signatures.createFromBytes, input),
+    createFromFile: () =>
+      invoke<Signature | null>(IPC_CHANNELS.signatures.createFromFile),
+    remove: (id: string) => invoke<void>(IPC_CHANNELS.signatures.remove, id),
+    apply: (input: ApplySignatureInput) =>
+      invoke<ApplySignatureResult>(IPC_CHANNELS.signatures.apply, input),
+    inspect: (filePath: string, password?: string) =>
+      invoke<InspectSignaturesResult>(IPC_CHANNELS.signatures.inspect, filePath, password),
+  },
   recents: {
     readThumb: (filePath: string) =>
       invoke<Uint8Array | null>(IPC_CHANNELS.recents.readThumb, filePath),
@@ -68,6 +88,11 @@ const api = {
   },
   shell: {
     homeFolders: () => invoke<HomeFolder[]>(IPC_CHANNELS.shell.homeFolders),
+  },
+  settings: {
+    get: () => invoke<AppSettings>(IPC_CHANNELS.settings.get),
+    set: (patch: Partial<AppSettings>) =>
+      invoke<AppSettings>(IPC_CHANNELS.settings.set, patch),
   },
 };
 
