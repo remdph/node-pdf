@@ -2945,6 +2945,68 @@ button.primary:hover {
   color: var(--fg-muted);
 }
 
+/* --- Certificate manager ----------------------------------------------- */
+.cert-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.cert-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+}
+
+.cert-field > span:first-child {
+  font-weight: 500;
+}
+
+.cert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cert-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.cert-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cert-row-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.cert-row-meta {
+  font-size: 0.74rem;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* --- Status-bar signed indicator --------------------------------------- */
 .status-signed {
   display: inline-flex;
@@ -2970,4 +3032,70 @@ button.primary:hover {
   background: rgba(255, 107, 107, 0.14);
   border-color: rgba(255, 107, 107, 0.4);
   color: var(--danger);
+}
+
+/* --- Certificate manager + digital sign dialog ------------------------- */
+.cert-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.cert-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.cert-field > span {
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.cert-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.cert-row-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cert-row-name {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cert-row-meta {
+  font-size: 0.74rem;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

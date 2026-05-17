@@ -15,8 +15,12 @@ import { useTabsStore } from '../stores/tabs.js';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import type { ProtectInput } from '~shared/types/ipc.js';
-import type { ExistingSignatureInfo } from '~shared/types/signatures.js';
+import type {
+  ExistingSignatureInfo,
+  SignDigitalInput,
+} from '~shared/types/signatures.js';
 
+import { DigitalSignDialog } from './DigitalSignDialog.js';
 import { PasswordDialog } from './PasswordDialog.js';
 import { PrintDialog } from './PrintDialog.js';
 import { ProtectDialog } from './ProtectDialog.js';
@@ -158,6 +162,9 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
   const [existingSignatures, setExistingSignatures] = useState<ExistingSignatureInfo[]>([]);
   const [signaturesLoading, setSignaturesLoading] = useState(false);
   const [signaturePanelOpen, setSignaturePanelOpen] = useState(false);
+  // Fase 3: cryptographic signing dialog state.
+  const [digitalSignOpen, setDigitalSignOpen] = useState(false);
+  const [digitalSigning, setDigitalSigning] = useState(false);
   const [placement, setPlacement] = useState<Placement | null>(null);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -951,6 +958,31 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     setPlacement(null);
   }, [selectStamp, selectSignature]);
 
+  const handleDigitalSign = useCallback(
+    async (input: Omit<SignDigitalInput, 'filePath'>) => {
+      setDigitalSigning(true);
+      try {
+        const result = await ipc.signatures.signDigital({
+          filePath,
+          ...input,
+        });
+        if (result.applied) {
+          // Force a full reload so the signature panel + integrity status
+          // pick up the new /Sig field; clear snapshots so we don't briefly
+          // show the un-signed page bitmap.
+          restorePageRef.current = activePage;
+          setRestoring(true);
+          snapshotCacheRef.current?.clear();
+          setReloadKey((k) => k + 1);
+          setDigitalSignOpen(false);
+        }
+      } finally {
+        setDigitalSigning(false);
+      }
+    },
+    [filePath, activePage],
+  );
+
   const applyPlacement = useCallback(async () => {
     if (!placement || applying) return;
     if (!selectedStampId && !selectedSignatureId) return;
@@ -1261,7 +1293,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
             title="Stamps"
             disabled={!isReady}
           >
-            <SignatureIcon />
+            <StampIcon />
           </button>
           <button
             ref={signatureBtnRef}
@@ -1277,7 +1309,22 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
             title="Signatures"
             disabled={!isReady}
           >
-            <SignaturePenIcon />
+            <SignatureIcon />
+          </button>
+          <button
+            type="button"
+            className={`pdf-tool${digitalSignOpen ? ' pdf-tool-active' : ''}`}
+            onClick={() => setDigitalSignOpen(true)}
+            aria-label="Digitally sign"
+            title={
+              isEncrypted
+                ? 'Digital signing unavailable for encrypted PDFs — remove protection first'
+                : 'Digitally sign with a certificate'
+            }
+            aria-pressed={digitalSignOpen}
+            disabled={!isReady}
+          >
+            <DigitalSignIcon />
           </button>
           <button
             type="button"
@@ -1487,6 +1534,16 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
         />
       )}
 
+      {digitalSignOpen && (
+        <DigitalSignDialog
+          filePath={filePath}
+          isEncrypted={isEncrypted}
+          busy={digitalSigning}
+          onClose={() => setDigitalSignOpen(false)}
+          onSign={handleDigitalSign}
+        />
+      )}
+
       {stampMenuAnchor && (
         <StampsMenu
           anchor={stampMenuAnchor}
@@ -1500,6 +1557,18 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
           anchor={signatureMenuAnchor}
           onClose={() => setSignatureMenuAnchor(null)}
           onSelect={(id) => selectSignature(id)}
+        />
+      )}
+
+      {digitalSignOpen && (
+        <DigitalSignDialog
+          filePath={filePath}
+          isEncrypted={isEncrypted}
+          busy={digitalSigning}
+          onClose={() => {
+            if (!digitalSigning) setDigitalSignOpen(false);
+          }}
+          onSign={handleDigitalSign}
         />
       )}
 
@@ -2015,25 +2084,41 @@ function SignatureIcon(): JSX.Element {
   );
 }
 
-/** Fountain-pen mark — visually distinct from the cursive squiggle used by
- * the Stamps button so the two adjacent toolbar slots aren't ambiguous. */
-function SignaturePenIcon(): JSX.Element {
+/** Rubber stamp silhouette — square pad, neck, and round handle on top,
+ * plus the implied surface underline. Reads as "rubber stamp" at toolbar
+ * size where finer detail would muddle. */
+function StampIcon(): JSX.Element {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      {/* Handle */}
+      <circle cx="9" cy="3" r="1.6" stroke="currentColor" strokeWidth="1.2" />
+      {/* Neck connecting handle to pad */}
       <path
-        d="M11.5 2.5 15 6l-7.5 7.5L4 14l.5-3.5z"
+        d="M9 4.6V7"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+      {/* Stamp pad (flares slightly wider than the neck) */}
+      <path
+        d="M5 11V8.5a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 13 8.5V11z"
         stroke="currentColor"
         strokeWidth="1.2"
         strokeLinejoin="round"
       />
-      <path
-        d="m11.5 2.5 1.5-1.5 2.5 2.5L14 5"
+      {/* Base block — the bit that hits the paper */}
+      <rect
+        x="3.5"
+        y="11"
+        width="11"
+        height="1.6"
+        rx="0.3"
         stroke="currentColor"
         strokeWidth="1.2"
-        strokeLinejoin="round"
       />
+      {/* Surface line — the paper */}
       <path
-        d="M2 16h14"
+        d="M2 15h14"
         stroke="currentColor"
         strokeWidth="1.1"
         strokeLinecap="round"
@@ -2042,3 +2127,26 @@ function SignaturePenIcon(): JSX.Element {
     </svg>
   );
 }
+
+/** Shield-with-checkmark — the conventional "cryptographically signed" mark
+ * that pairs with our other signature icons without duplicating their look. */
+function DigitalSignIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <path
+        d="M9 1.5 2.5 4v4.5c0 4 2.8 6.7 6.5 8 3.7-1.3 6.5-4 6.5-8V4z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m6 9 2 2 4-4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+

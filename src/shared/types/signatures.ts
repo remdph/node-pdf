@@ -44,6 +44,19 @@ export interface ApplySignatureResult {
 // Fase 2: inspection of existing /Sig fields in a PDF
 // ---------------------------------------------------------------------------
 
+/** Chain-of-trust verdict for the signer cert. Independent of integrity:
+ * a CMS that's cryptographically valid still earns no trust if its cert
+ * doesn't chain to a recognized root. */
+export type SignatureTrustStatus =
+  /** Chain verifies against a Mozilla-trusted root CA. */
+  | 'trusted'
+  /** Subject DN == issuer DN. No third party vouches for this identity. */
+  | 'self-signed'
+  /** Chain doesn't reach a trusted root (or the chain is incomplete). */
+  | 'untrusted'
+  /** Couldn't compute (parse failure / no cert in CMS). */
+  | 'unknown';
+
 /** Status of an existing signature relative to the document's current bytes. */
 export type SignatureIntegrityStatus =
   /** Hash of the byte-range matches the digest in the CMS — document hasn't
@@ -67,6 +80,13 @@ export interface ExistingSignatureInfo {
   subFilter: string;
   /** CN (or first available DN component) of the signer cert. */
   signerName: string | null;
+  /** CN of the cert issuer. Equals signerName when self-signed; null when
+   * the parser couldn't reach the cert. */
+  issuerCN: string | null;
+  /** True when subject DN == issuer DN. Self-signed certs prove only what
+   * their holder asserts — there's no third party vouching for the identity
+   * — so the UI should make this distinction explicit. */
+  isSelfSigned: boolean;
   /** Signing time. Prefers the CMS signed attribute; falls back to /M. ISO string. */
   signedAt: string | null;
   /** /Reason from the signature dict, if present. */
@@ -78,8 +98,66 @@ export interface ExistingSignatureInfo {
   /** True if this signature includes a DocMDP /TransformParams entry — i.e.
    * it's a certification signature, not a plain approval signature. */
   isCertification: boolean;
+  // -------------------------------------------------------------------------
+  // Temporal validity — cert's own NotBefore/NotAfter window. Independent
+  // from integrity: a cert can be expired today yet have been valid at the
+  // time of signing, which keeps the historical signature meaningful (the
+  // PAdES long-term validation story).
+  // -------------------------------------------------------------------------
+  /** Cert's notBefore (ISO). */
+  validFrom: string | null;
+  /** Cert's notAfter (ISO). */
+  validTo: string | null;
+  /** `now` is within [notBefore, notAfter]. Null when the dates are missing. */
+  validNow: boolean | null;
+  /** Signing time was within [notBefore, notAfter]. Null when either bound or
+   * signedAt was missing. THIS is what matters for whether the historical
+   * signature was valid — `validNow` only matters if you plan to KEEP using
+   * this cert to sign new things. */
+  validAtSigning: boolean | null;
+  /** Cert's notAfter is in the past today. Null when notAfter was missing. */
+  expiredNow: boolean | null;
+  // -------------------------------------------------------------------------
+  // Trust dimension — chain-of-trust verdict against Mozilla's root bundle.
+  // -------------------------------------------------------------------------
+  trustStatus: SignatureTrustStatus;
+  /** CN of the trusted root when trustStatus === 'trusted'. */
+  trustedRootCN: string | null;
 }
 
 export interface InspectSignaturesResult {
   signatures: ExistingSignatureInfo[];
+}
+
+// ---------------------------------------------------------------------------
+// Fase 3: cryptographic (PKCS#7 / CMS) digital signing
+// ---------------------------------------------------------------------------
+
+/** Inputs for a cryptographic sign operation. */
+export interface SignDigitalInput {
+  filePath: string;
+  /** Id of a stored Certificate. */
+  certId: string;
+  /** Passphrase for the cert's PKCS#12 — never persisted; the user must
+   * re-supply it on every signing operation. */
+  certPassword: string;
+  /** PDF password if the PDF is encrypted (same convention as applyStamp). */
+  password?: string;
+  /** Optional /Reason field embedded in the signature dict. */
+  reason?: string;
+  /** Optional /Location field. */
+  location?: string;
+  /** Optional /ContactInfo field. */
+  contactInfo?: string;
+  /** Optional id of a saved visual signature image to use as the widget's
+   * visual appearance (/AP /N). If omitted, the signature is invisible. */
+  visualSignatureId?: string;
+  /** Page index for the visual appearance. Ignored when invisible. */
+  pageIndex?: number;
+  /** Normalized rect for the visual appearance. Ignored when invisible. */
+  rect?: NormRect;
+}
+
+export interface SignDigitalResult {
+  applied: boolean;
 }

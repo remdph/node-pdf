@@ -9,10 +9,13 @@ import type {
   CreateSignatureFromBytesInput,
   InspectSignaturesResult,
   Signature,
+  SignDigitalInput,
+  SignDigitalResult,
 } from '~shared/types/signatures.js';
 
 import { embedImageOnPage } from '../pdf/embed.js';
 import { inspectSignatures } from '../signatures/inspect.js';
+import { signPdfDigitally } from '../signatures/sign-digital.js';
 import {
   addSignatureFromBytes,
   addSignatureFromFile,
@@ -119,6 +122,48 @@ export function registerSignaturesIpc(): void {
       }
       const signatures = await inspectSignatures(filePath, password);
       return { signatures };
+    },
+  );
+
+  handle<[SignDigitalInput], SignDigitalResult>(
+    IPC_CHANNELS.signatures.signDigital,
+    async (event, input) => {
+      if (!input || typeof input.filePath !== 'string' || !path.isAbsolute(input.filePath)) {
+        throw new NodePdfError('INVALID_PATH', 'Invalid PDF path');
+      }
+      if (typeof input.certId !== 'string' || !input.certId) {
+        throw new NodePdfError('VALIDATION_ERROR', 'Certificate id is required');
+      }
+      if (typeof input.certPassword !== 'string') {
+        throw new NodePdfError('VALIDATION_ERROR', 'Certificate password is required');
+      }
+
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const confirm = win
+        ? await dialog.showMessageBox(win, {
+            type: 'question',
+            buttons: ['Cancel', 'Sign'],
+            defaultId: 1,
+            cancelId: 0,
+            message: `Digitally sign ${path.basename(input.filePath)}?`,
+            detail:
+              'A cryptographic signature will be embedded in this file. ' +
+              'The signature can be verified later in any PDF viewer that ' +
+              'supports PKCS#7 signatures (Adobe Reader, Foxit, etc.).',
+          })
+        : { response: 1 };
+      if (confirm.response !== 1) return { applied: false };
+
+      await signPdfDigitally({
+        filePath: input.filePath,
+        certId: input.certId,
+        certPassword: input.certPassword,
+        password: input.password,
+        reason: input.reason,
+        location: input.location,
+        contactInfo: input.contactInfo,
+      });
+      return { applied: true };
     },
   );
 }

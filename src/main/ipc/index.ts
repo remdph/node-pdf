@@ -1,4 +1,5 @@
 import { registerAppIpc } from './app.js';
+import { registerCertsIpc } from './certs.js';
 import { registerPdfIpc } from './pdf.js';
 import { registerRecentsIpc } from './recents.js';
 import { registerSettingsIpc } from './settings.js';
@@ -14,6 +15,7 @@ export function registerAllIpc(): void {
   registerShellIpc();
   registerStampsIpc();
   registerSignaturesIpc();
+  registerCertsIpc();
   registerRecentsIpc();
   registerSettingsIpc();
 }

@@ -1,3 +1,8 @@
+import type {
+  Certificate,
+  GenerateCertInput,
+  ImportCertInput,
+} from './certs.js';
 import type { AppSettings } from './settings.js';
 import type {
   ApplySignatureInput,
@@ -5,6 +10,8 @@ import type {
   CreateSignatureFromBytesInput,
   InspectSignaturesResult,
   Signature,
+  SignDigitalInput,
+  SignDigitalResult,
 } from './signatures.js';
 import type { ApplyStampInput, ApplyStampResult, Stamp } from './stamps.js';
 
@@ -109,6 +116,20 @@ export interface IpcApi {
     apply(input: ApplySignatureInput): Promise<ApplySignatureResult>;
     /** Inspect existing /Sig fields in a PDF and report their integrity. */
     inspect(filePath: string, password?: string): Promise<InspectSignaturesResult>;
+    /** Apply a cryptographic PKCS#7 signature to a PDF using a stored cert.
+     * `visualSignatureId` + `rect` + `pageIndex` are optional: omitting them
+     * produces an invisible signature with no on-page mark. */
+    signDigital(input: SignDigitalInput): Promise<SignDigitalResult>;
+  };
+  certs: {
+    list(): Promise<Certificate[]>;
+    generate(input: GenerateCertInput): Promise<Certificate>;
+    /** Open the OS file picker for a .p12/.pfx and return the chosen path.
+     * Used by the renderer's two-step import flow (pick file, then prompt
+     * for the cert password in a UI dialog). */
+    pickFile(): Promise<string | null>;
+    import(input: ImportCertInput): Promise<Certificate>;
+    remove(id: string): Promise<void>;
   };
   recents: {
     readThumb(filePath: string): Promise<Uint8Array | null>;
@@ -159,6 +180,14 @@ export const IPC_CHANNELS = {
     remove: 'signatures:remove',
     apply: 'signatures:apply',
     inspect: 'signatures:inspect',
+    signDigital: 'signatures:sign-digital',
+  },
+  certs: {
+    list: 'certs:list',
+    generate: 'certs:generate',
+    pickFile: 'certs:pick-file',
+    import: 'certs:import',
+    remove: 'certs:remove',
   },
   recents: {
     readThumb: 'recents:read-thumb',

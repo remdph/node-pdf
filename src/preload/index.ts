@@ -8,6 +8,11 @@ import type {
   PrintOptions,
   ProtectInput,
 } from '~shared/types/ipc.js';
+import type {
+  Certificate,
+  GenerateCertInput,
+  ImportCertInput,
+} from '~shared/types/certs.js';
 import type { AppSettings } from '~shared/types/settings.js';
 import type {
   ApplySignatureInput,
@@ -15,6 +20,8 @@ import type {
   CreateSignatureFromBytesInput,
   InspectSignaturesResult,
   Signature,
+  SignDigitalInput,
+  SignDigitalResult,
 } from '~shared/types/signatures.js';
 import type { ApplyStampInput, ApplyStampResult, Stamp } from '~shared/types/stamps.js';
 
@@ -79,6 +86,17 @@ const api = {
       invoke<ApplySignatureResult>(IPC_CHANNELS.signatures.apply, input),
     inspect: (filePath: string, password?: string) =>
       invoke<InspectSignaturesResult>(IPC_CHANNELS.signatures.inspect, filePath, password),
+    signDigital: (input: SignDigitalInput) =>
+      invoke<SignDigitalResult>(IPC_CHANNELS.signatures.signDigital, input),
+  },
+  certs: {
+    list: () => invoke<Certificate[]>(IPC_CHANNELS.certs.list),
+    generate: (input: GenerateCertInput) =>
+      invoke<Certificate>(IPC_CHANNELS.certs.generate, input),
+    pickFile: () => invoke<string | null>(IPC_CHANNELS.certs.pickFile),
+    import: (input: ImportCertInput) =>
+      invoke<Certificate>(IPC_CHANNELS.certs.import, input),
+    remove: (id: string) => invoke<void>(IPC_CHANNELS.certs.remove, id),
   },
   recents: {
     readThumb: (filePath: string) =>
