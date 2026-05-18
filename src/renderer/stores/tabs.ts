@@ -35,6 +35,10 @@ interface TabsState {
   openPdf(input: { filePath: string; title?: string }): void;
   /** Update the visible title for a tab (e.g. after the user renames it). */
   updateTitle(tabId: string, title: string): void;
+  /** Move a tab from `fromIndex` to `toIndex` (drag-and-drop reorder).
+   * `toIndex` is the slot the tab should occupy AFTER removal — same
+   * convention as the HTML5 DnD drop position the titlebar passes in. */
+  reorder(fromIndex: number, toIndex: number): void;
   closeAll(): void;
   /** Toggle the side panel into a specific mode; clicking the active mode
    * collapses the panel. */
@@ -49,8 +53,7 @@ const RECENTS_MAX = 10;
 const makeId = () => `tab-${Math.random().toString(36).slice(2, 10)}`;
 
 function deriveTitle(filePath: string): string {
-  const base = filePath.split(/[\\/]/).pop() ?? filePath;
-  return base.replace(/\.pdf$/i, '');
+  return filePath.split(/[\\/]/).pop() ?? filePath;
 }
 
 export const useTabsStore = create<TabsState>()(
@@ -113,6 +116,19 @@ export const useTabsStore = create<TabsState>()(
           tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, title } : t)),
         })),
 
+      reorder: (fromIndex, toIndex) =>
+        set((s) => {
+          if (fromIndex === toIndex) return {};
+          if (fromIndex < 0 || fromIndex >= s.tabs.length) return {};
+          if (toIndex < 0 || toIndex > s.tabs.length) return {};
+          const next = s.tabs.slice();
+          const [moved] = next.splice(fromIndex, 1);
+          if (!moved) return {};
+          const insertAt = toIndex > fromIndex ? toIndex - 1 : toIndex;
+          next.splice(insertAt, 0, moved);
+          return { tabs: next };
+        }),
+
       closeAll: () => set({ tabs: [], activeId: null, view: 'picker' }),
 
       addRecent: ({ filePath, title }) => {
@@ -154,7 +170,7 @@ export const useTabsStore = create<TabsState>()(
         recents: state.recents,
         starred: state.starred,
       }),
-      version: 5,
+      version: 6,
       migrate: (persisted, version) => {
         if (!persisted || typeof persisted !== 'object') return persisted;
         let next = persisted as Record<string, unknown>;
@@ -168,6 +184,26 @@ export const useTabsStore = create<TabsState>()(
         // v4 → v5: introduces `starred` list.
         if (version < 5) {
           next = { ...next, starred: [] };
+        }
+        // v5 → v6: tab/recent titles now include the `.pdf` extension.
+        // Re-derive any title that's the bare basename of its filePath —
+        // updateTitle is never invoked from the UI today so this is safe.
+        if (version < 6) {
+          const restore = <T extends { title?: string; filePath?: string }>(t: T): T => {
+            if (!t || typeof t.filePath !== 'string') return t;
+            const base = t.filePath.split(/[\\/]/).pop() ?? t.filePath;
+            const stripped = base.replace(/\.pdf$/i, '');
+            // Only rewrite if the stored title matches the auto-derived
+            // stripped basename; preserve anything bespoke (defensive — no
+            // UI path produces a custom title yet).
+            if (t.title === stripped && stripped !== base) {
+              return { ...t, title: base };
+            }
+            return t;
+          };
+          const ntabs = Array.isArray(next.tabs) ? (next.tabs as PdfTab[]).map(restore) : next.tabs;
+          const nrec = Array.isArray(next.recents) ? (next.recents as RecentDoc[]).map(restore) : next.recents;
+          next = { ...next, tabs: ntabs, recents: nrec };
         }
         return next;
       },

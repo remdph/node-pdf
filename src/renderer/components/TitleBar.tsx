@@ -5,8 +5,12 @@ import { ipc } from '../lib/ipc.js';
 import iconUrl from '../assets/icon.png';
 import { AboutDialog } from './AboutDialog.js';
 
-const TAB_FIXED_WIDTH = 200;
+// Layout caps mirrored from .tab in global.css. Used only as fallbacks
+// when measurement hasn't run yet — the actual widths come from the
+// off-screen measurement container's offsetWidth.
+const TAB_MAX_WIDTH = 200;
 const OVERFLOW_BTN_WIDTH = 30;
+const DND_MIME = 'application/x-nodepdf-tab';
 
 // macOS draws native traffic lights over our titlebar; render an empty
 // drag-reserved spacer of the same width where the brand icon would sit
@@ -22,11 +26,18 @@ export function TitleBar(): JSX.Element {
   const setView = useTabsStore((s) => s.setView);
   const starred = useTabsStore((s) => s.starred);
   const toggleStarred = useTabsStore((s) => s.toggleStarred);
+  const reorder = useTabsStore((s) => s.reorder);
 
   const [maximized, setMaximized] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const tabsContainerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+
+  // Measured natural width of each tab, keyed by tab id. Populated by the
+  // off-screen .titlebar-tabs-measure container after each render.
+  const measureRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [tabWidths, setTabWidths] = useState<Map<string, number>>(new Map());
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ipc?.window) return;
@@ -52,31 +63,85 @@ export function TitleBar(): JSX.Element {
     return () => ro.disconnect();
   }, []);
 
+  // Read each tab's natural offsetWidth from the off-screen measurement
+  // container after every render that could change a tab's intrinsic
+  // size: open/close/reorder (tabs identity), active swap (the star
+  // button only renders for the active tab and adds 22+gap to width),
+  // or rename (title text length). Only commit a new Map if something
+  // actually changed so we don't trigger render loops.
+  useLayoutEffect(() => {
+    const widths = new Map<string, number>();
+    for (const t of tabs) {
+      const el = measureRefs.current.get(t.id);
+      if (el) widths.set(t.id, el.offsetWidth);
+    }
+    setTabWidths((prev) => {
+      if (prev.size !== widths.size) return widths;
+      for (const [k, v] of widths) {
+        if (prev.get(k) !== v) return widths;
+      }
+      return prev;
+    });
+  }, [tabs, activeId]);
+
   // Decide which tabs are visible and which spill into the overflow menu.
   // The active tab is pinned so it always shows, even if its natural slot
-  // would have been hidden (Chrome / VSCode behavior).
+  // would have been hidden (Chrome / VSCode behavior). Widths come from
+  // the measurement pass above; before that lands we render everything
+  // and let the next paint correct it.
   const { visibleTabs, hiddenTabs } = useMemo(() => {
     if (tabs.length === 0) return { visibleTabs: [], hiddenTabs: [] };
-    const idealVisible = Math.max(1, Math.floor(containerWidth / TAB_FIXED_WIDTH));
-    if (idealVisible >= tabs.length) {
+    if (containerWidth === 0 || tabWidths.size === 0) {
       return { visibleTabs: tabs, hiddenTabs: [] };
     }
-    const withButtonVisible = Math.max(
-      1,
-      Math.floor((containerWidth - OVERFLOW_BTN_WIDTH) / TAB_FIXED_WIDTH),
-    );
-    const visibleSet = new Set(tabs.slice(0, withButtonVisible).map((t) => t.id));
-    if (activeId && !visibleSet.has(activeId)) {
-      const lastInHead = tabs.slice(0, withButtonVisible).at(-1);
-      if (lastInHead) {
-        visibleSet.delete(lastInHead.id);
-        visibleSet.add(activeId);
-      }
+    const widthOf = (id: string) => tabWidths.get(id) ?? TAB_MAX_WIDTH;
+
+    let total = 0;
+    for (const t of tabs) total += widthOf(t.id);
+    if (total <= containerWidth) {
+      return { visibleTabs: tabs, hiddenTabs: [] };
     }
-    const visible = tabs.filter((t) => visibleSet.has(t.id));
-    const hidden = tabs.filter((t) => !visibleSet.has(t.id));
+
+    // Doesn't fit — reserve room for the overflow chevron and greedily
+    // pack tabs from the start until budget is exhausted.
+    const budget = containerWidth - OVERFLOW_BTN_WIDTH;
+    const visibleIds = new Set<string>();
+    let used = 0;
+    for (const t of tabs) {
+      const w = widthOf(t.id);
+      if (used + w > budget) break;
+      visibleIds.add(t.id);
+      used += w;
+    }
+    // Always keep at least one tab on-screen so the user has something to
+    // click; if even the first tab busts the budget, show it anyway.
+    if (visibleIds.size === 0 && tabs[0]) {
+      visibleIds.add(tabs[0].id);
+      used = widthOf(tabs[0].id);
+    }
+
+    // Pin the active tab. If it's not in the greedy head, evict trailing
+    // visible tabs (preserving original order) until the active fits.
+    if (activeId && !visibleIds.has(activeId)) {
+      const activeW = widthOf(activeId);
+      const visibleOrdered = tabs.filter((t) => visibleIds.has(t.id));
+      while (visibleOrdered.length > 0 && used + activeW > budget) {
+        const removed = visibleOrdered.pop()!;
+        visibleIds.delete(removed.id);
+        used -= widthOf(removed.id);
+      }
+      visibleIds.add(activeId);
+    }
+
+    const visible = tabs.filter((t) => visibleIds.has(t.id));
+    const hidden = tabs.filter((t) => !visibleIds.has(t.id));
     return { visibleTabs: visible, hiddenTabs: hidden };
-  }, [tabs, containerWidth, activeId]);
+  }, [tabs, tabWidths, containerWidth, activeId]);
+
+  const setMeasureRef = (id: string) => (el: HTMLDivElement | null) => {
+    if (el) measureRefs.current.set(id, el);
+    else measureRefs.current.delete(id);
+  };
 
   const onMinimize = () => {
     ipc?.window?.minimize().catch((err) => console.error('[TitleBar] minimize failed', err));
@@ -93,9 +158,12 @@ export function TitleBar(): JSX.Element {
       {isMac ? (
         <div className="titlebar-traffic-light-slot" aria-hidden />
       ) : (
-        <div className="titlebar-brand">
-          <img src={iconUrl} alt="NodePDF" className="titlebar-icon" draggable={false} />
-        </div>
+        <>
+          <div className="titlebar-brand">
+            <img src={iconUrl} alt="NodePDF" className="titlebar-icon" draggable={false} />
+          </div>
+          <span className="titlebar-sep" aria-hidden />
+        </>
       )}
 
       <button
@@ -122,11 +190,19 @@ export function TitleBar(): JSX.Element {
           <TabItem
             key={tab.id}
             tab={tab}
+            index={tabs.findIndex((t) => t.id === tab.id)}
             active={view === 'tab' && tab.id === activeId}
             starred={starred.includes(tab.filePath)}
+            isDragging={draggingId === tab.id}
             onActivate={() => activate(tab.id)}
             onClose={() => close(tab.id)}
             onToggleStar={() => toggleStarred(tab.filePath)}
+            onDragStartTab={(id) => setDraggingId(id)}
+            onDragEndTab={() => setDraggingId(null)}
+            onReorder={(from, to) => {
+              setDraggingId(null);
+              reorder(from, to);
+            }}
           />
         ))}
         {hiddenTabs.length > 0 && (
@@ -136,6 +212,23 @@ export function TitleBar(): JSX.Element {
             onClose={close}
           />
         )}
+      </div>
+
+      {/* Off-screen sizing pass — same .tab markup so each item gets its
+       * real intrinsic width measured into tabWidths above. Kept outside
+       * the titlebar's flex flow so it can't affect the live layout. */}
+      <div className="titlebar-tabs-measure" aria-hidden>
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            ref={setMeasureRef(tab.id)}
+            className={`tab tab-pdf${tab.id === activeId ? ' tab-active' : ''}`}
+          >
+            {tab.id === activeId && <div className="tab-star" />}
+            <span className="tab-title">{tab.title}</span>
+            <div className="tab-close" />
+          </div>
+        ))}
       </div>
 
       <div className="titlebar-controls">
@@ -203,22 +296,40 @@ export function TitleBar(): JSX.Element {
 
 function TabItem({
   tab,
+  index,
   active,
   starred,
+  isDragging,
   onActivate,
   onClose,
   onToggleStar,
+  onDragStartTab,
+  onDragEndTab,
+  onReorder,
 }: {
   tab: PdfTab;
+  /** Absolute index in the full `tabs` array — what `reorder` expects. */
+  index: number;
   active: boolean;
   starred: boolean;
+  isDragging: boolean;
   onActivate: () => void;
   onClose: () => void;
   onToggleStar: () => void;
+  onDragStartTab: (id: string) => void;
+  onDragEndTab: () => void;
+  onReorder: (fromIndex: number, toIndex: number) => void;
 }): JSX.Element {
+  const [dropEdge, setDropEdge] = useState<'before' | 'after' | null>(null);
+
   return (
     <div
-      className={`tab tab-pdf${active ? ' tab-active' : ''}`}
+      className={
+        `tab tab-pdf${active ? ' tab-active' : ''}` +
+        `${isDragging ? ' tab-dragging' : ''}` +
+        `${dropEdge === 'before' ? ' tab-drop-before' : ''}` +
+        `${dropEdge === 'after' ? ' tab-drop-after' : ''}`
+      }
       onClick={onActivate}
       onMouseDown={(e) => {
         if (e.button === 1) {
@@ -228,6 +339,54 @@ function TabItem({
       }}
       role="button"
       tabIndex={0}
+      // Native tooltip on the whole tab (not just the title text) so it
+      // shows up no matter where on the tab the cursor lands. First line
+      // is the filename (the only thing the eye needs when titles are
+      // ellipsized at 200px); second line is the absolute path for
+      // disambiguating same-name files in different folders.
+      title={`${tab.title}\n${tab.filePath}`}
+      draggable
+      onDragStart={(e) => {
+        // Use a custom MIME so we can reject foreign drops (files etc.)
+        // in onDragOver without picking up text drops from elsewhere.
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData(DND_MIME, String(index));
+        e.dataTransfer.setData('text/plain', tab.title);
+        onDragStartTab(tab.id);
+      }}
+      onDragEnd={() => {
+        setDropEdge(null);
+        onDragEndTab();
+      }}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(DND_MIME)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (isDragging) {
+          setDropEdge(null);
+          return;
+        }
+        const r = e.currentTarget.getBoundingClientRect();
+        setDropEdge(e.clientX < r.left + r.width / 2 ? 'before' : 'after');
+      }}
+      onDragLeave={(e) => {
+        // Ignore bubbles from children — only clear when the cursor truly
+        // leaves the tab box.
+        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+        setDropEdge(null);
+      }}
+      onDrop={(e) => {
+        const raw = e.dataTransfer.getData(DND_MIME);
+        setDropEdge(null);
+        if (!raw) return;
+        e.preventDefault();
+        const fromIndex = Number(raw);
+        if (!Number.isFinite(fromIndex)) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        const before = e.clientX < r.left + r.width / 2;
+        const toIndex = before ? index : index + 1;
+        onReorder(fromIndex, toIndex);
+      }}
     >
       {active && (
         <button
@@ -236,6 +395,9 @@ function TabItem({
           aria-label={starred ? `Unstar ${tab.title}` : `Star ${tab.title}`}
           aria-pressed={starred}
           title={starred ? 'Unstar' : 'Star'}
+          // Buttons inside a draggable parent become drag handles by
+          // default; opt out so star/close clicks aren't read as drags.
+          draggable={false}
           onClick={(e) => {
             e.stopPropagation();
             onToggleStar();
@@ -244,13 +406,12 @@ function TabItem({
           <StarIcon filled={starred} />
         </button>
       )}
-      <span className="tab-title" title={tab.filePath}>
-        {tab.title}
-      </span>
+      <span className="tab-title">{tab.title}</span>
       <button
         type="button"
         className="tab-close"
         aria-label={`Close ${tab.title}`}
+        draggable={false}
         onClick={(e) => {
           e.stopPropagation();
           onClose();

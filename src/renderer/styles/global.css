@@ -156,6 +156,9 @@ body,
   justify-content: center;
   width: 32px;
   height: 100%;
+  /* Breathing room on both sides so the home button isn't visually glued
+   * to the bevel separator on the left nor the first tab on the right. */
+  margin: 0 0.4rem;
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -205,6 +208,20 @@ body,
    * overflow button opt out of drag below. */
   -webkit-app-region: drag;
   app-region: drag;
+}
+
+/* Hidden sizing pass: rendered off-screen with identical .tab markup so
+ * the JS layer can read each tab's natural offsetWidth without flicker,
+ * then decide which tabs spill into the overflow menu. Kept in layout
+ * (display: flex) but invisible and outside the viewport. */
+.titlebar-tabs-measure {
+  position: fixed;
+  top: -10000px;
+  left: -10000px;
+  display: flex;
+  align-items: stretch;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .titlebar-controls {
@@ -284,7 +301,11 @@ body.platform-darwin .pdf-toolbar {
   align-items: center;
   gap: 0.4rem;
   padding: 0 0.6rem 0 0.55rem;
-  width: 200px;
+  /* Width adapts to the title text: short names produce narrower tabs,
+   * long ones grow up to the cap and then ellipsize. Min keeps the close
+   * button reachable; max preserves the legacy 200px ceiling. */
+  min-width: 100px;
+  max-width: 200px;
   flex-shrink: 0;
   /* Inactive tabs sit slightly DARKER than the titlebar so the active
    * one reads as the foreground without needing an accent underline. */
@@ -300,6 +321,29 @@ body.platform-darwin .pdf-toolbar {
     color 0.12s ease;
   -webkit-app-region: no-drag;
   app-region: no-drag;
+}
+
+/* Drag-and-drop reorder visuals. The drag source fades so the user can
+ * see the gap it leaves behind; the hover target draws a 2px accent bar
+ * on whichever edge the cursor is closer to, signaling insert position. */
+.tab-dragging {
+  opacity: 0.4;
+}
+.tab-drop-before::before,
+.tab-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 0;
+  width: 2px;
+  background: #6aa3ff;
+  pointer-events: none;
+}
+.tab-drop-before::before {
+  left: -1px;
+}
+.tab-drop-after::after {
+  right: -1px;
 }
 
 .tab:hover {
@@ -351,12 +395,22 @@ body.platform-darwin .pdf-toolbar {
 }
 
 .tab-title {
-  flex: 1;
+  /* `flex: 1 1 auto` (instead of `flex: 1`) means the title contributes
+   * its natural text width to the parent's intrinsic sizing — that's
+   * what lets short titles produce narrow tabs. `min-width: 0` lets it
+   * shrink below content size when the tab hits its 200px cap so the
+   * ellipsis can engage. */
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.78rem;
   margin-top: 3px;
+  /* Block native text selection — we want pointerdown on the title to
+   * initiate a tab drag, not a selection. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .tab-close {
@@ -1800,6 +1854,37 @@ button.primary:hover {
 .pdf-paginator-nav {
   width: 22px;
   height: 22px;
+}
+
+/* Thin vertical divider with a classic 2-line bevel: a dark 1px shadow
+ * on the left + a light 1px highlight (the element itself) on the
+ * right, painting a recessed groove. Reused inside the paginator and in
+ * the titlebar between the app icon and the home button (Win/Linux
+ * only — on macOS the brand slot is the empty traffic-light spacer and
+ * we don't render this separator). Both surfaces are dark enough that
+ * the same alpha values read cleanly. */
+.pdf-paginator-sep,
+.titlebar-sep {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.22);
+  box-shadow: -1px 0 0 0 rgba(0, 0, 0, 0.55);
+  /* Asymmetric: the -1px bevel shadow visually adds width on the left,
+   * so shrink left margin (~3px) and keep right (~8px) to look centered. */
+  margin: 0 0.5rem 0 0.2rem;
+  flex-shrink: 0;
+}
+
+/* Titlebar variant: vertically center within the titlebar row and pin
+ * to no-drag so the separator gap doesn't trigger a window drag. Zero
+ * the right margin — the home button next to it already supplies its
+ * own symmetric horizontal margin, and stacking both was pushing the
+ * home button off-center between the separator and the first tab. */
+.titlebar-sep {
+  align-self: center;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  margin-right: 0;
 }
 
 .pdf-paginator-form {

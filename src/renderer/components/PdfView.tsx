@@ -1183,6 +1183,17 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
             <OutlineIcon />
           </button>
           <div className="pdf-paginator">
+            <span className="pdf-paginator-sep" aria-hidden />
+            <button
+              type="button"
+              className="pdf-tool pdf-paginator-nav"
+              onClick={() => scrollToPage(1)}
+              aria-label="First page"
+              title="First page"
+              disabled={!isReady || activePage <= 1}
+            >
+              <FirstPageIcon />
+            </button>
             <button
               type="button"
               className="pdf-tool pdf-paginator-nav"
@@ -1241,6 +1252,16 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
               disabled={!isReady || activePage >= numPages}
             >
               <ChevronDownIcon />
+            </button>
+            <button
+              type="button"
+              className="pdf-tool pdf-paginator-nav"
+              onClick={() => scrollToPage(numPages)}
+              aria-label="Last page"
+              title="Last page"
+              disabled={!isReady || activePage >= numPages}
+            >
+              <LastPageIcon />
             </button>
           </div>
         </div>
@@ -2034,6 +2055,34 @@ function ChevronDownIcon(): JSX.Element {
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
       <path
         d="M3 4.5 L6 7.5 L9 4.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function FirstPageIcon(): JSX.Element {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+      <path
+        d="M3 3 L9 3 M3 8 L6 5 L9 8"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function LastPageIcon(): JSX.Element {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+      <path
+        d="M3 4 L6 7 L9 4 M3 9 L9 9"
         stroke="currentColor"
         strokeWidth="1.5"
         strokeLinecap="round"
