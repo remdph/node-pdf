@@ -33,3 +33,6 @@ Untitled.af
 Untitled.af~lock~
 *.af~lock~
 
+
+# Affinity Designer source files (design originals; not for repo)
+*.af
