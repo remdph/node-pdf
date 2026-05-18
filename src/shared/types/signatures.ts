@@ -177,6 +177,11 @@ export interface SignDigitalInput {
    * timestamp and embeds it as an unsignedAttribute in the SignerInfo,
    * upgrading the signature to PAdES-T (still verifiable past cert expiry). */
   tsaUrl?: string;
+  /** PAdES-LT: when true, the signer pre-fetches an OCSP response for the
+   * signer cert and embeds it (with the full cert chain) into the
+   * document's /DSS. Verifiers can then validate the signature OFFLINE
+   * for the long term — no dependency on the OCSP responder being live. */
+  embedRevocationInfo?: boolean;
 }
 
 export interface SignDigitalResult {

@@ -63,6 +63,10 @@ export function DigitalSignDialog({
   // setting just for this signing — the change persists to settings when
   // they actually sign, not on every keystroke.
   const [tsaUrlInput, setTsaUrlInput] = useState('');
+  // PAdES-LT: embed cert chain + OCSP response so verifiers can validate
+  // the sig OFFLINE for years. Off by default since it requires network
+  // (and slows signing by the OCSP round-trip).
+  const [embedRevocation, setEmbedRevocation] = useState(false);
 
   useEffect(() => {
     if (!loaded) void load();
@@ -140,6 +144,7 @@ export function DigitalSignDialog({
         ...(contactInfo.trim() ? { contactInfo: contactInfo.trim() } : {}),
         ...(visibleMode && visualSignatureId ? { visualSignatureId } : {}),
         ...(useTimestamp && tsaUrlInput.trim() ? { tsaUrl: tsaUrlInput.trim() } : {}),
+        ...(embedRevocation ? { embedRevocationInfo: true } : {}),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -366,6 +371,35 @@ export function DigitalSignDialog({
                     internet access at sign time.
                   </div>
                 </>
+              )}
+            </div>
+
+            <div className="cert-field">
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={embedRevocation}
+                  onChange={(e) => setEmbedRevocation(e.target.checked)}
+                  disabled={busy}
+                />
+                <span style={{ fontSize: '0.85rem', color: 'var(--fg)' }}>
+                  Embed revocation info for offline verification (PAdES-LT)
+                </span>
+              </label>
+              {embedRevocation && (
+                <div className="signature-editor-hint" style={{ marginTop: '0.3rem' }}>
+                  Fetches the cert&apos;s OCSP response right now and embeds
+                  it (plus the full cert chain) into the document&apos;s
+                  /DSS. Verifiers can then check revocation OFFLINE for
+                  years to come, even if the OCSP responder is gone.
+                </div>
               )}
             </div>
 

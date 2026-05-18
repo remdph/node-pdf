@@ -482,6 +482,21 @@ const OCSP_REVOCATION_REASONS: Record<number, string> = {
  * we couldn't reach the responder — callers treat null as "no information"
  * rather than an error. */
 export async function checkOcsp(input: OcspCheckInput): Promise<OcspResult | null> {
+  const raw = await fetchOcspResponseRaw(input);
+  if (!raw) return null;
+  return parseOcspResponse(raw);
+}
+
+/**
+ * Same as checkOcsp but returns the RAW OCSP response DER bytes instead of
+ * a parsed verdict. Used by the digital-signing pipeline to "staple" the
+ * response into the PDF's /DSS dict — verifiers can then check revocation
+ * offline (no network round-trip at verify time) and the staple stays
+ * meaningful for years after the OCSP responder is gone.
+ */
+export async function fetchOcspResponseRaw(
+  input: OcspCheckInput,
+): Promise<Uint8Array | null> {
   const url = extractOcspUrl(input.cert);
   if (!url) return null;
   let req: Uint8Array;
@@ -491,9 +506,8 @@ export async function checkOcsp(input: OcspCheckInput): Promise<OcspResult | nul
   } catch {
     return null;
   }
-  let resp: Uint8Array;
   try {
-    resp = await postBinary(
+    return await postBinary(
       url,
       'application/ocsp-request',
       req,
@@ -502,5 +516,4 @@ export async function checkOcsp(input: OcspCheckInput): Promise<OcspResult | nul
   } catch {
     return null;
   }
-  return parseOcspResponse(resp);
 }

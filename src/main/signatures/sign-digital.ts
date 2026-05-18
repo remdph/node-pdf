@@ -19,6 +19,7 @@ import type { NormRect } from '~shared/types/stamps.js';
 
 import { readCertP12 } from '../certs/storage.js';
 import { parseP12 } from '../certs/crypto.js';
+import { fetchOcspResponseRaw } from './ocsp.js';
 import { findSignature } from './storage.js';
 import { requestTimestampToken } from './tsa.js';
 
@@ -98,6 +99,13 @@ export interface SignDigitalOptions {
    * PAdES-T and proves the signature existed at the TSA's reported time,
    * which keeps it verifiable after the signer's cert expires. */
   tsaUrl?: string;
+  /** PAdES-LT (Long Term): stapling. When true, we pre-fetch the OCSP
+   * response for the signer cert and embed it — along with the full cert
+   * chain — into the document's /DSS so verifiers can validate the
+   * signature OFFLINE for years to come (no dependency on the OCSP
+   * responder still being up). Best-effort: if OCSP fetch fails, we still
+   * embed the certs but signing continues. */
+  embedRevocationInfo?: boolean;
 }
 
 /** Format a Date as PDF date string: `D:YYYYMMDDHHmmSSZ`. */
@@ -427,6 +435,97 @@ interface VisibleAppearance {
   image: PDFImage;
 }
 
+/** Serialize a forge cert to its DER bytes (Uint8Array). */
+function certToDer(cert: forge.pki.Certificate): Uint8Array {
+  const der = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
+  const out = new Uint8Array(der.length);
+  for (let i = 0; i < der.length; i++) out[i] = der.charCodeAt(i) & 0xff;
+  return out;
+}
+
+/**
+ * Embed Long-Term Validation artifacts (cert chain + OCSP responses) into
+ * the document's /DSS (Document Security Store) — the standard PAdES-LT
+ * mechanism for offline verification. See ETSI EN 319 142-1 §5.4.2.
+ *
+ *   /Catalog
+ *     /DSS <<
+ *       /Certs [<cert_stream> <cert_stream> ...]
+ *       /OCSPs [<ocsp_stream> ...]
+ *     >>
+ *
+ * Each entry is an indirect reference to a stream object whose raw bytes
+ * are the DER encoding of the artifact. With /DSS in place a verifier can
+ * answer "was this cert valid at signing time?" without ANY network access,
+ * which matters because:
+ *
+ *   - OCSP responders go offline; URLs change.
+ *   - Network might be restricted at the verifier's end (air-gapped audit).
+ *   - The verifier may be examining the document years after signing.
+ *
+ * We deliberately put the /DSS in the SAME incremental update as the /Sig
+ * field. That way the /Sig's ByteRange covers the /DSS bytes too — the
+ * stapled validation info is itself authenticated by the signature, so an
+ * attacker can't strip + re-staple their own "this cert is good" claim.
+ */
+function addDocumentSecurityStore(
+  doc: PDFDocument,
+  certs: forge.pki.Certificate[],
+  ocspResponses: Uint8Array[],
+): void {
+  if (certs.length === 0 && ocspResponses.length === 0) return;
+  const ctx = doc.context;
+
+  // Embed each cert as its own indirect stream object.
+  const certRefs: PDFRef[] = certs.map((cert) => {
+    const der = certToDer(cert);
+    const streamDict = ctx.obj({ Length: der.length });
+    const stream = PDFRawStream.of(streamDict, der);
+    return ctx.register(stream);
+  });
+
+  const ocspRefs: PDFRef[] = ocspResponses.map((respDer) => {
+    const streamDict = ctx.obj({ Length: respDer.length });
+    const stream = PDFRawStream.of(streamDict, respDer);
+    return ctx.register(stream);
+  });
+
+  // Build (or merge) /DSS on the catalog. If a previous incremental update
+  // already added one (multi-sig scenarios), we extend its /Certs and
+  // /OCSPs arrays instead of overwriting.
+  const catalogDssRaw = doc.catalog.get(PDFName.of('DSS'));
+  let dss: PDFDict;
+  if (catalogDssRaw instanceof PDFDict) {
+    dss = catalogDssRaw;
+  } else if (catalogDssRaw instanceof PDFRef) {
+    const resolved = ctx.lookup(catalogDssRaw);
+    dss = resolved instanceof PDFDict ? resolved : ctx.obj({});
+    if (!(resolved instanceof PDFDict)) {
+      doc.catalog.set(PDFName.of('DSS'), dss);
+    }
+  } else {
+    dss = ctx.obj({});
+    doc.catalog.set(PDFName.of('DSS'), dss);
+  }
+
+  if (certRefs.length > 0) {
+    let certsArr = dss.lookup(PDFName.of('Certs'));
+    if (!(certsArr instanceof PDFArray)) {
+      certsArr = ctx.obj([]);
+      dss.set(PDFName.of('Certs'), certsArr);
+    }
+    for (const ref of certRefs) (certsArr as PDFArray).push(ref);
+  }
+  if (ocspRefs.length > 0) {
+    let ocspsArr = dss.lookup(PDFName.of('OCSPs'));
+    if (!(ocspsArr instanceof PDFArray)) {
+      ocspsArr = ctx.obj([]);
+      dss.set(PDFName.of('OCSPs'), ocspsArr);
+    }
+    for (const ref of ocspRefs) (ocspsArr as PDFArray).push(ref);
+  }
+}
+
 /**
  * Append a /Sig field + widget annotation to the document. With no
  * `visible` arg, the widget is invisible (zero rect + Hidden+Locked flags)
@@ -567,7 +666,7 @@ export async function signPdfDigitally(opts: SignDigitalOptions): Promise<void> 
   if (!p12Bytes) {
     throw new NodePdfError('VALIDATION_ERROR', 'Certificate not found');
   }
-  const { cert, keyPem } = parseP12(new Uint8Array(p12Bytes), opts.certPassword);
+  const { cert, chain, keyPem } = parseP12(new Uint8Array(p12Bytes), opts.certPassword);
 
   // ---- 2. Add placeholder /Sig field + save (incremental) ----------------
   // Loading with `forIncrementalUpdate: true` makes saveIncremental return
@@ -635,6 +734,30 @@ export async function signPdfDigitally(opts: SignDigitalOptions): Promise<void> 
       pdfRect: { x: xPt, y: yPt, width: widthPt, height: heightPt },
       image,
     };
+  }
+
+  // PAdES-LT: pre-fetch OCSP for the signer cert + embed cert chain into
+  // /DSS BEFORE adding the /Sig field. This way the /Sig's ByteRange will
+  // cover the /DSS bytes — the validation info is itself authenticated.
+  // Skipped automatically when:
+  //  - User didn't request it (embedRevocationInfo !== true)
+  //  - Chain has no issuer cert (self-signed → no OCSP to ask anyway, but
+  //    we still embed the cert itself so verifiers have it)
+  if (opts.embedRevocationInfo) {
+    const ocspResponses: Uint8Array[] = [];
+    if (chain.length >= 2) {
+      try {
+        const raw = await fetchOcspResponseRaw({
+          cert: chain[0]!,
+          issuerCert: chain[1]!,
+        });
+        if (raw) ocspResponses.push(raw);
+      } catch {
+        // Network / responder failure — proceed without the OCSP staple.
+        // Cert chain alone still gives the verifier something to work with.
+      }
+    }
+    addDocumentSecurityStore(doc, chain, ocspResponses);
   }
 
   addSignatureField(

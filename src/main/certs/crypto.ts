@@ -6,7 +6,13 @@ import { NodePdfError } from '~shared/types/errors.js';
 import type { Certificate, GenerateCertInput } from '~shared/types/certs.js';
 
 export interface ParsedP12 {
+  /** The signer (leaf) certificate. Same reference as `chain[0]` for
+   * convenience — most callers only care about this one. */
   cert: forge.pki.Certificate;
+  /** All certificates in the PKCS#12, ordered leaf → root if the chain is
+   * well-formed. Used by sign-digital.ts to embed the full chain into the
+   * PDF's /DSS for offline verification (OCSP stapling / PAdES-LT). */
+  chain: forge.pki.Certificate[];
   /** PEM-encoded private key. Kept as PEM so callers can hand it back to
    * forge / node:crypto without re-handling forge's intermediate types. */
   keyPem: string;
@@ -37,8 +43,8 @@ export function parseP12(p12Der: Uint8Array, password: string): ParsedP12 {
     );
   }
 
-  let cert: forge.pki.Certificate | null = null;
   let key: forge.pki.PrivateKey | null = null;
+  const certs: forge.pki.Certificate[] = [];
 
   for (const safeContents of p12.safeContents) {
     for (const bag of safeContents.safeBags) {
@@ -49,22 +55,50 @@ export function parseP12(p12Der: Uint8Array, password: string): ParsedP12 {
       ) {
         key = bag.key;
       } else if (bag.type === forge.pki.oids.certBag && bag.cert) {
-        // Prefer the leaf cert (non-CA) if multiple are present. Common case
-        // is exactly one cert though.
-        if (!cert || !bag.cert.isIssuer(bag.cert)) cert = bag.cert;
+        certs.push(bag.cert);
       }
     }
   }
 
-  if (!cert || !key) {
+  if (certs.length === 0 || !key) {
     throw new NodePdfError(
       'VALIDATION_ERROR',
       'PKCS#12 file does not contain both a certificate and a private key',
     );
   }
 
+  // Order the chain leaf → root by walking subject/issuer DN hashes.
+  // The leaf is the only cert that isn't issuer of any other cert in the
+  // bag; we put it first and then chase issuers from there.
+  const issuedBy = (a: forge.pki.Certificate): forge.pki.Certificate | null => {
+    for (const c of certs) {
+      if (c !== a && a.issuer.hash === c.subject.hash) return c;
+    }
+    return null;
+  };
+  const isIssuerOfAny = (a: forge.pki.Certificate): boolean => {
+    for (const c of certs) {
+      if (c !== a && c.issuer.hash === a.subject.hash) return true;
+    }
+    return false;
+  };
+  let leaf = certs.find((c) => !isIssuerOfAny(c));
+  // If we can't disambiguate (single self-signed cert, or malformed bag),
+  // fall back to the first one — order doesn't matter for /DSS purposes.
+  if (!leaf) leaf = certs[0]!;
+  const chain: forge.pki.Certificate[] = [leaf];
+  let current = leaf;
+  for (let depth = 0; depth < 16; depth++) {
+    if (current.subject.hash === current.issuer.hash) break; // self-signed root
+    const next = issuedBy(current);
+    if (!next || chain.includes(next)) break;
+    chain.push(next);
+    current = next;
+  }
+
   return {
-    cert,
+    cert: leaf,
+    chain,
     keyPem: forge.pki.privateKeyToPem(key),
   };
 }
