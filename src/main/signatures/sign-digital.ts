@@ -26,11 +26,13 @@ import { requestTimestampToken } from './tsa.js';
 /**
  * PDF cryptographic signing pipeline (PKCS#7 / CMS detached, adbe.pkcs7.detached).
  *
- * Approach: INCREMENTAL UPDATE. We load the PDF, take a snapshot, attach a
- * /Sig field (+ widget, + AcroForm bookkeeping), and ask pdf-lib to emit
- * only the *delta* — new objects + updated xref + new trailer. The original
- * PDF bytes are preserved verbatim. This is the canonical way to add
- * signatures to a PDF per ISO 32000 §12.8 and unlocks two important cases:
+ * Approach: INCREMENTAL UPDATE. We load the PDF with `forIncrementalUpdate`
+ * (which arms an auto-tracking snapshot on the context), attach a /Sig
+ * field (+ widget, + AcroForm bookkeeping), then call `doc.commit()` which
+ * emits only the *delta* — new objects + modified xref entries + new
+ * trailer — appended to the byte-perfect original. This is the canonical
+ * way to add signatures to a PDF per ISO 32000 §12.8 and unlocks two
+ * important cases:
  *
  *  1. Encrypted PDFs work without re-encryption (which would shift offsets
  *     and break ByteRange). The original encrypted objects stay encrypted;
@@ -41,15 +43,16 @@ import { requestTimestampToken } from './tsa.js';
  *
  * Pipeline:
  *
- *  1. Load with `forIncrementalUpdate: true`, take a snapshot of the
- *     existing object table.
+ *  1. Load with `forIncrementalUpdate: true` — pdf-lib auto-arms a snapshot
+ *     on the context and starts tracking mutations.
  *  2. Embed image (if visible) + register a /Sig dict whose /ByteRange is a
  *     known-pattern placeholder and whose /Contents is a 16 KB all-zero hex
  *     slot. Attach a widget annotation (visible or invisible) to the target
- *     page; update AcroForm.Fields.
- *  3. Call `saveIncremental(snapshot, { useObjectStreams: false })`. The
- *     returned buffer contains only the delta; concatenate to the original
- *     bytes for the full signed PDF body.
+ *     page; update AcroForm.Fields. The mutations to existing objects
+ *     (catalog → AcroForm, page → /Annots) get auto-marked for incremental
+ *     output thanks to the snapshot tracking.
+ *  3. Call `doc.commit({ useObjectStreams: false })`. Returns the FULL
+ *     signed PDF bytes (original + appended incremental section).
  *  4. Locate the /Contents placeholder in the combined bytes, derive the
  *     real ByteRange (covers the entire file except the hex slot), patch
  *     the ByteRange placeholder in place (preserving byte length).
@@ -639,11 +642,17 @@ function addSignatureField(
 
   // The page hosting the widget MUST include it in its /Annots — both for
   // visible (so Reader paints it) and invisible (so Reader can resolve
-  // clicks / focus / signature panel cross-references).
+  // clicks / focus / signature panel cross-references). Use `lookup` (not
+  // `get`) here so we follow indirect refs: if /Annots was already an
+  // indirect array (which is normal), `get` would return the bare PDFRef
+  // and our `instanceof PDFArray` check would fall through to the else,
+  // OVERWRITING the page's existing annotations (e.g. prior signature
+  // widgets from a previous incremental update) with a new one-element
+  // array. That's the bug that caused earlier signatures to vanish.
   const targetPage = pages[targetPageIndex]!;
-  const annotsRaw = targetPage.node.get(PDFName.of('Annots'));
-  if (annotsRaw instanceof PDFArray) {
-    annotsRaw.push(widgetRef);
+  const annotsResolved = targetPage.node.lookup(PDFName.of('Annots'));
+  if (annotsResolved instanceof PDFArray) {
+    annotsResolved.push(widgetRef);
   } else {
     targetPage.node.set(PDFName.of('Annots'), ctx.obj([widgetRef]));
   }
@@ -669,14 +678,20 @@ export async function signPdfDigitally(opts: SignDigitalOptions): Promise<void> 
   const { cert, chain, keyPem } = parseP12(new Uint8Array(p12Bytes), opts.certPassword);
 
   // ---- 2. Add placeholder /Sig field + save (incremental) ----------------
-  // Loading with `forIncrementalUpdate: true` makes saveIncremental return
-  // only the appended objects + new xref + trailer — the original PDF
-  // bytes are preserved verbatim. Critical for two reasons:
+  // Loading with `forIncrementalUpdate: true` makes pdf-lib auto-track
+  // mutations against the snapshot it takes at load time. We use the
+  // `commit()` helper later — it serializes only changed objects + a new
+  // xref + trailer, then concatenates onto the original byte-perfect
+  // source. Critical for two reasons:
   //   1. Encrypted PDFs: original encrypted objects stay encrypted; we
   //      only add new objects. /Sig.Contents is exempt from encryption
   //      per spec so the placeholder remains findable.
-  //   2. Multi-sig PDFs (future): adding signature #2 doesn't invalidate
+  //   2. Multi-sig PDFs: adding signature #2 doesn't invalidate
   //      signature #1 because #1's byte-range bytes don't change.
+  // DO NOT call takeSnapshot() manually — when forIncrementalUpdate has
+  // already armed context.snapshot, takeSnapshot returns a NEW empty
+  // snapshot that won't reflect any of our mutations. The auto-tracked
+  // snapshot inside context.snapshot is the one commit() consults.
   let doc: PDFDocument;
   try {
     doc = await PDFDocument.load(pdfBytes, {
@@ -686,7 +701,6 @@ export async function signPdfDigitally(opts: SignDigitalOptions): Promise<void> 
   } catch (err) {
     throw new NodePdfError('INVALID_PDF', 'PDF could not be parsed', err);
   }
-  const snapshot = doc.takeSnapshot();
 
   // Prepare the visible appearance (if requested) BEFORE saving — we need
   // pdf-lib to embed the image as an Image XObject during serialization.
@@ -771,22 +785,21 @@ export async function signPdfDigitally(opts: SignDigitalOptions): Promise<void> 
   );
 
   // Object streams MUST be off — placeholder bytes need to be findable in
-  // the raw output, and stream compression would mask them.
-  let incrementalBytes: Uint8Array;
+  // the raw output, and stream compression would mask them. commit() does
+  // saveIncremental with the auto-tracked snapshot AND concatenates the
+  // original bytes for us — returning the full signed PDF in one shot.
+  let combinedBytes: Uint8Array;
   try {
-    incrementalBytes = await doc.saveIncremental(snapshot, {
-      useObjectStreams: false,
-    });
+    combinedBytes = await doc.commit({ useObjectStreams: false });
   } catch (err) {
     throw new NodePdfError('READ_FAILED', 'Failed to serialize incremental update', err);
   }
 
-  // ---- 3. Concatenate + locate placeholder + patch ByteRange --------------
-  // The full signed PDF = original bytes verbatim + the incremental section
-  // containing our new sig dict, widget, modified AcroForm/Page xref entries,
-  // and updated trailer. ByteRange will end up covering the whole thing
+  // ---- 3. Locate placeholder + patch ByteRange ---------------------------
+  // The /Sig dict (with placeholder Contents) lives in the appended
+  // incremental section. ByteRange will end up covering the whole file
   // except the Contents hex slot.
-  let buf = Buffer.concat([pdfBytes, Buffer.from(incrementalBytes)]);
+  let buf = Buffer.from(combinedBytes);
   const { contentsStart, contentsEnd } = findContentsPlaceholder(buf);
   const byteRange: [number, number, number, number] = [
     0,

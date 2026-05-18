@@ -3,8 +3,6 @@ import { PDFDocument } from '@cantoo/pdf-lib';
 
 import { NodePdfError } from '~shared/types/errors.js';
 
-import { toPdfLibPermissions, type PdfDocumentLike } from './encryption.js';
-
 export type ImageFormat = 'png' | 'jpg' | 'jpeg';
 
 export interface ImageRect {
@@ -21,17 +19,27 @@ export interface EmbedImageInput {
   rect: ImageRect;
   imageBytes: Uint8Array;
   imageFormat: ImageFormat;
-  /** Decrypts the PDF for editing AND is reused as the user/owner password
-   * when re-encrypting. v1 caveat: original permissions are NOT preserved
-   * across a re-encrypt — we re-grant the default broad set. */
+  /** Password for the source PDF if it's encrypted. With the incremental-
+   * update path the original encrypted bytes are preserved verbatim — we
+   * never re-encrypt — so existing protection stays intact and we don't
+   * need to know the owner password / permissions to write back. */
   password?: string;
 }
 
 /**
  * Read a PDF from disk, embed a raster image on the specified page using a
- * normalized rect, and write the result back in place. Shared by the stamps
- * pipeline (`applyStamp`) and the upcoming signatures pipeline so both go
- * through identical decrypt/embed/re-encrypt behavior.
+ * normalized rect, and write the result back in place via INCREMENTAL
+ * UPDATE. Shared by the stamps pipeline (`applyStamp`) and the visual
+ * signatures pipeline (`signatures.apply`) so both flows preserve any
+ * existing cryptographic signatures byte-exact.
+ *
+ * Why incremental matters here: `doc.save()` regenerates the entire PDF
+ * from scratch, which means every object gets a new byte offset. Any
+ * existing /Sig field's /ByteRange points at OLD offsets, so the
+ * signature's CMS no longer matches the document hash and Reader marks
+ * it as "modified after signing" or hides it entirely. Incremental
+ * update appends our new image + page mutation as a delta on top of the
+ * untouched original bytes — prior signatures' byte ranges stay valid.
  *
  * Throws `NodePdfError` on any failure; callers should let it bubble up to
  * the IPC handler (`handle()` in `register.ts` translates it for the renderer).
@@ -48,7 +56,12 @@ export async function embedImageOnPage(input: EmbedImageInput): Promise<void> {
 
   let doc: PDFDocument;
   try {
-    doc = await PDFDocument.load(pdfBytes, password ? { password } : undefined);
+    doc = await PDFDocument.load(pdfBytes, {
+      // Arm the auto-tracking snapshot so commit() emits an incremental
+      // section instead of a full re-save.
+      forIncrementalUpdate: true,
+      ...(password ? { password } : {}),
+    });
   } catch (err) {
     throw new NodePdfError('INVALID_PDF', 'PDF could not be parsed', err);
   }
@@ -78,16 +91,10 @@ export async function embedImageOnPage(input: EmbedImageInput): Promise<void> {
 
   let outBytes: Uint8Array;
   try {
-    if (password) {
-      (doc as unknown as PdfDocumentLike).encrypt({
-        userPassword: password,
-        ownerPassword: password,
-        permissions: toPdfLibPermissions(undefined),
-      });
-      outBytes = await doc.save({ useObjectStreams: false });
-    } else {
-      outBytes = await doc.save();
-    }
+    // commit() = saveIncremental(context.snapshot) + concat onto original
+    // bytes. Existing encryption is preserved automatically because we
+    // never touched the original encrypted objects.
+    outBytes = await doc.commit({ useObjectStreams: false });
   } catch (err) {
     throw new NodePdfError('READ_FAILED', 'Failed to serialize PDF', err);
   }

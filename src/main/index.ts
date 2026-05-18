@@ -1,12 +1,15 @@
-import { app, BrowserWindow, Menu } from 'electron';
+import { app, BrowserWindow, Menu, protocol } from 'electron';
 
 import { createMainWindow } from './windows.js';
 import { registerFileAssociations } from './file-association.js';
 import { registerAllIpc } from './ipc/index.js';
 import { addPendingFile, deliverFileToRenderer } from './ipc/pdf.js';
 import { buildApplicationMenu } from './menu.js';
-import { registerSignatureProtocol, registerSignatureScheme } from './signatures/protocol.js';
-import { registerStampProtocol, registerStampScheme } from './stamps/protocol.js';
+import {
+  registerSignatureProtocol,
+  SIGNATURE_SCHEME_PRIVILEGES,
+} from './signatures/protocol.js';
+import { registerStampProtocol, STAMP_SCHEME_PRIVILEGES } from './stamps/protocol.js';
 
 // Windows installer entry; resolves before app is "ready" when Squirrel kicks in.
 import electronSquirrelStartup from 'electron-squirrel-startup';
@@ -74,9 +77,15 @@ if (app.isPackaged) {
 // effective scale via WaylandFractionalScaleV1, so trust it and only fall
 // back to GDK_SCALE on X11 (where toolkits historically used that var).
 // NODEPDF_SCALE remains an explicit override for either session type.
-// Privileged scheme registration MUST happen before app is ready.
-registerStampScheme();
-registerSignatureScheme();
+// Privileged scheme registration MUST happen before app is ready, and
+// `registerSchemesAsPrivileged` may only be called ONCE per process —
+// calling it per-module silently loses all but the last scheme. We bundle
+// every privileged scheme here so each module just contributes its
+// descriptor and avoids the foot-gun.
+protocol.registerSchemesAsPrivileged([
+  STAMP_SCHEME_PRIVILEGES,
+  SIGNATURE_SCHEME_PRIVILEGES,
+]);
 
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');

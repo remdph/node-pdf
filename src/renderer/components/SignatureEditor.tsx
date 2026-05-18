@@ -19,22 +19,59 @@ const TYPED_FONTS = [
   { id: 'vibes', label: 'Great Vibes', css: "'Great Vibes', cursive" },
 ] as const;
 
-/** Pre-render a canvas at devicePixelRatio so strokes stay crisp on HiDPI.
- * Returns a tuple of the CSS-sized canvas and its 2D context with the dpr
- * scaling already applied. */
+/** Drawing-canvas backing-store dimensions, in PHYSICAL pixels. Independent
+ * of the canvas's CSS size and the device pixel ratio — the browser scales
+ * the 2400×900 backing-store to fit whatever CSS box the canvas occupies.
+ * Why hardcoded:
+ *
+ *  - Earlier versions sized the backing store from `getBoundingClientRect()`
+ *    at setup time. That sometimes returned 0 width when the modal had
+ *    just mounted and layout wasn't flushed, so the canvas kept its HTML
+ *    default 300×150 and signatures came out painfully pixelated.
+ *  - A fixed high-DPI backing store is also nicer downstream: the saved
+ *    PNG always has enough detail (>1500 px wide after crop) to stay crisp
+ *    when the signed PDF is viewed at 300%+ zoom on a Retina screen.
+ *
+ * 900 height matches a ~2.67:1 aspect (~520×200 CSS). The browser stretches
+ * the backing store to whatever CSS height the canvas actually has, with
+ * smooth interpolation. */
+const CANVAS_BACKING_WIDTH = 2400;
+const CANVAS_BACKING_HEIGHT = 900;
+
+/** Stroke thickness in BACKING-STORE pixels (canvas.width units). With the
+ * 2400×900 backing store displayed at ~520×200 CSS, the on-screen stroke
+ * appears ~2 CSS pixels wide — same visual weight as the previous version
+ * that drew at lineWidth=2.2 in CSS units. */
+const CANVAS_LINE_WIDTH = 10;
+
 function setupCanvas(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  canvas.width = Math.round(rect.width * dpr);
-  canvas.height = Math.round(rect.height * dpr);
+  canvas.width = CANVAS_BACKING_WIDTH;
+  canvas.height = CANVAS_BACKING_HEIGHT;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('canvas 2d context unavailable');
-  ctx.scale(dpr, dpr);
-  ctx.lineWidth = 2.2;
+  ctx.lineWidth = CANVAS_LINE_WIDTH;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.strokeStyle = '#111';
   return ctx;
+}
+
+/** Convert a pointer event's clientX/clientY into backing-store pixel
+ * coords for the given canvas. Measures the canvas's CSS rect lazily on
+ * each call so we always get a valid layout (vs measuring once at setup
+ * time when layout might not be flushed yet). */
+function pointerToCanvas(
+  canvas: HTMLCanvasElement,
+  clientX: number,
+  clientY: number,
+): { x: number; y: number } {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / (rect.width || 1);
+  const scaleY = canvas.height / (rect.height || 1);
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY,
+  };
 }
 
 /** Crop a canvas to the bounding box of opaque pixels, leaving a small
@@ -148,8 +185,7 @@ export function SignatureEditor({ onClose, onCreated }: SignatureEditorProps): J
     if (!canvas) return;
     canvas.setPointerCapture(e.pointerId);
     drawingRef.current = true;
-    const rect = canvas.getBoundingClientRect();
-    lastPointRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    lastPointRef.current = pointerToCanvas(canvas, e.clientX, e.clientY);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -158,9 +194,7 @@ export function SignatureEditor({ onClose, onCreated }: SignatureEditorProps): J
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const { x, y } = pointerToCanvas(canvas, e.clientX, e.clientY);
     const last = lastPointRef.current;
     if (!last) {
       lastPointRef.current = { x, y };
@@ -194,10 +228,10 @@ export function SignatureEditor({ onClose, onCreated }: SignatureEditorProps): J
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // Setup no longer applies ctx.scale — drawing uses backing-store coords
+    // directly — so we can clearRect at canvas dims without saving/restoring
+    // a transform.
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.restore();
     setHasDrawn(false);
   };
 
@@ -242,8 +276,14 @@ export function SignatureEditor({ onClose, onCreated }: SignatureEditorProps): J
       if (!cctx) throw new Error('clone canvas context unavailable');
       cctx.drawImage(canvas, 0, 0);
 
-      const transparent = rasterToTransparentPng(clone);
-      const cropped = cropToContent(transparent);
+      // Skip the luma→alpha matting here: the draw canvas starts with a
+      // transparent-black background (default for un-filled canvases), and
+      // matting on that flips background pixels (RGB 0,0,0) to OPAQUE black
+      // — turning the whole image into a black rectangle. The strokes are
+      // drawn with #111 ink so their own anti-aliased alpha is already what
+      // we want. The matting helper is only correct for the typed flow,
+      // which paints a white background first.
+      const cropped = cropToContent(clone);
       if (!cropped) {
         setError('Canvas is empty');
         return;

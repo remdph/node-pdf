@@ -5,21 +5,18 @@ import { listSignatures, signaturePath } from './storage.js';
 
 export const SIGNATURE_SCHEME = 'signature';
 
-/** Must be called before `app.whenReady()`. Mirrors stamps/protocol.ts. */
-export function registerSignatureScheme(): void {
-  protocol.registerSchemesAsPrivileged([
-    {
-      scheme: SIGNATURE_SCHEME,
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        bypassCSP: false,
-        stream: false,
-      },
-    },
-  ]);
-}
+/** Privilege descriptor — see stamps/protocol.ts for why all schemes must
+ * be registered in a single `registerSchemesAsPrivileged` call. */
+export const SIGNATURE_SCHEME_PRIVILEGES = {
+  scheme: SIGNATURE_SCHEME,
+  privileges: {
+    standard: true,
+    secure: true,
+    supportFetchAPI: true,
+    bypassCSP: false,
+    stream: false,
+  },
+} as const;
 
 /** Must be called after `app.whenReady()`. */
 export function registerSignatureProtocol(): void {

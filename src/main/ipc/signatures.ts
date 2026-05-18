@@ -154,6 +154,11 @@ export function registerSignaturesIpc(): void {
         : { response: 1 };
       if (confirm.response !== 1) return { applied: false };
 
+      // Forward EVERY field — earlier versions of this handler whitelisted
+      // a subset and silently dropped the visible-appearance + TSA + LT
+      // fields, which made signers think the operation failed (no on-page
+       // mark, no timestamp, no DSS) even though an invisible signature
+      // had actually been embedded.
       await signPdfDigitally({
         filePath: input.filePath,
         certId: input.certId,
@@ -162,6 +167,11 @@ export function registerSignaturesIpc(): void {
         reason: input.reason,
         location: input.location,
         contactInfo: input.contactInfo,
+        visualSignatureId: input.visualSignatureId,
+        pageIndex: input.pageIndex,
+        rect: input.rect,
+        tsaUrl: input.tsaUrl,
+        embedRevocationInfo: input.embedRevocationInfo,
       });
       return { applied: true };
     },

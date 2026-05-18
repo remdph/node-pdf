@@ -5,21 +5,19 @@ import { stampPath, listStamps } from './storage.js';
 
 export const STAMP_SCHEME = 'stamp';
 
-/** Must be called before `app.whenReady()`. */
-export function registerStampScheme(): void {
-  protocol.registerSchemesAsPrivileged([
-    {
-      scheme: STAMP_SCHEME,
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        bypassCSP: false,
-        stream: false,
-      },
-    },
-  ]);
-}
+/** Privilege descriptor — bundled with other schemes in a single
+ * `registerSchemesAsPrivileged` call from main/index.ts (Electron only
+ * accepts one such call per process; multiple calls silently lose data). */
+export const STAMP_SCHEME_PRIVILEGES = {
+  scheme: STAMP_SCHEME,
+  privileges: {
+    standard: true,
+    secure: true,
+    supportFetchAPI: true,
+    bypassCSP: false,
+    stream: false,
+  },
+} as const;
 
 /** Must be called after `app.whenReady()`. */
 export function registerStampProtocol(): void {

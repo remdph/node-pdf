@@ -59,6 +59,51 @@ const THUMB_WIDTH = 140;
 const WHEEL_ZOOM_FACTOR = 1.1;
 const STAMP_INIT_MAX_W = 300;
 const STAMP_INIT_PAGE_FRACTION = 0.4;
+
+/** Compute the initial placement rect for a stamp/signature being armed for
+ * the user to drag/resize. Horizontally centered on the page; vertically
+ * positioned at the center of whatever portion of the page is currently
+ * visible in the scroller — so it shows up "where the user is reading"
+ * rather than always at the bottom or top. */
+function initialPlacementRect(
+  pageEl: HTMLElement,
+  scrollerEl: HTMLElement | null,
+  imgW: number,
+  imgH: number,
+  pageFraction: number,
+): { x: number; y: number; w: number; h: number } {
+  const pw = pageEl.clientWidth;
+  const ph = pageEl.clientHeight;
+  const ratio = imgW / imgH || 1;
+  const w = Math.min(STAMP_INIT_MAX_W, pw * pageFraction);
+  const h = w / ratio;
+
+  const x = Math.max(0, (pw - w) / 2);
+
+  let y: number;
+  if (scrollerEl) {
+    const pageRect = pageEl.getBoundingClientRect();
+    const scrollRect = scrollerEl.getBoundingClientRect();
+    // Intersection of the scroller viewport with the page rect — the
+    // currently-visible band of the page in screen coords.
+    const visibleTop = Math.max(scrollRect.top, pageRect.top);
+    const visibleBottom = Math.min(scrollRect.bottom, pageRect.bottom);
+    if (visibleBottom > visibleTop) {
+      const viewportCenterY = (visibleTop + visibleBottom) / 2;
+      // Convert viewport-Y into page-local-Y by subtracting the page's top.
+      const yInPage = viewportCenterY - pageRect.top;
+      y = yInPage - h / 2;
+    } else {
+      // Page isn't visible at all (edge case) → fall back to vertical center.
+      y = (ph - h) / 2;
+    }
+  } else {
+    y = (ph - h) / 2;
+  }
+  y = Math.max(0, Math.min(ph - h, y));
+
+  return { x, y, w, h };
+}
 // Short enough to feel instant, long enough to coalesce a rapid burst of
 // +/-/wheel events into a single canvas re-render.
 const ZOOM_RENDER_DEBOUNCE_MS = 60;
@@ -176,6 +221,9 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
   const [placement, setPlacement] = useState<Placement | null>(null);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  /** Last error from applyPlacement / signDigital. Surfaced in the action
+   * bar so the user sees WHY signing failed instead of nothing happening. */
+  const [placementError, setPlacementError] = useState<string | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
   const [protectOpen, setProtectOpen] = useState(false);
   const [protecting, setProtecting] = useState(false);
@@ -773,7 +821,10 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     // clears any armed signature so the overlay routes to the stamp.
     if (selectedSignatureId) selectSignature(null);
     const idx = activePage - 1;
-    pagesVirtuosoRef.current?.scrollToIndex({ index: idx, align: 'start' });
+    // Don't scrollToIndex any more — the user's current page IS the active
+    // page by definition, and yanking the scroll position so they suddenly
+    // see the top of the page is jarring. initialPlacementRect picks a Y
+    // based on whatever portion of the page is currently visible.
 
     let cancelled = false;
     const tryInit = (attempts: number) => {
@@ -789,19 +840,15 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
       const img = new Image();
       img.onload = () => {
         if (cancelled) return;
-        const pw = pageEl.clientWidth;
-        const ph = pageEl.clientHeight;
-        const ratio = img.naturalWidth / img.naturalHeight || 1;
-        const w = Math.min(STAMP_INIT_MAX_W, pw * STAMP_INIT_PAGE_FRACTION);
-        const h = w / ratio;
         setPlacement({
           pageIndex: idx,
-          rect: {
-            x: Math.max(0, (pw - w) / 2),
-            y: Math.max(0, Math.min(40, ph - h - 40)),
-            w,
-            h,
-          },
+          rect: initialPlacementRect(
+            pageEl,
+            pagesEl,
+            img.naturalWidth,
+            img.naturalHeight,
+            STAMP_INIT_PAGE_FRACTION,
+          ),
         });
       };
       img.onerror = () => {
@@ -828,7 +875,8 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     }
     if (selectedStampId) selectStamp(null);
     const idx = activePage - 1;
-    pagesVirtuosoRef.current?.scrollToIndex({ index: idx, align: 'start' });
+    // Same rationale as the stamps effect — let initialPlacementRect anchor
+    // to wherever the user is currently looking in the page.
 
     let cancelled = false;
     const tryInit = (attempts: number) => {
@@ -844,21 +892,17 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
       const img = new Image();
       img.onload = () => {
         if (cancelled) return;
-        const pw = pageEl.clientWidth;
-        const ph = pageEl.clientHeight;
-        const ratio = img.naturalWidth / img.naturalHeight || 1;
-        // Signatures default a bit smaller than stamps — typically placed
-        // inline next to a printed name rather than as a page-spanning mark.
-        const w = Math.min(STAMP_INIT_MAX_W, pw * 0.35);
-        const h = w / ratio;
         setPlacement({
           pageIndex: idx,
-          rect: {
-            x: Math.max(0, (pw - w) / 2),
-            y: Math.max(0, Math.min(ph - h - 40, ph - h - 40)),
-            w,
-            h,
-          },
+          // Signatures default a bit smaller than stamps — typically placed
+          // inline next to a printed name rather than as a page-spanning mark.
+          rect: initialPlacementRect(
+            pageEl,
+            pagesEl,
+            img.naturalWidth,
+            img.naturalHeight,
+            0.35,
+          ),
         });
       };
       img.onerror = () => {
@@ -967,6 +1011,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     // Also drop any half-armed digital sign — if the user backed out at the
     // placement stage, they need to reopen the dialog to start over.
     setPendingDigitalSign(null);
+    setPlacementError(null);
   }, [selectStamp, selectSignature]);
 
   const handleDigitalSign = useCallback(
@@ -1042,6 +1087,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     };
 
     setApplying(true);
+    setPlacementError(null);
     try {
       // Routing rules (mutually exclusive):
       //   1. Pending digital sign + visual selected → signDigital with the
@@ -1093,6 +1139,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
       }
     } catch (err) {
       console.error('[PdfView] applyPlacement failed', err);
+      setPlacementError(err instanceof Error ? err.message : String(err));
     } finally {
       setApplying(false);
     }
@@ -1509,6 +1556,22 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
 
         {placement && (selectedStampId || selectedSignatureId) && (
           <div className="stamp-action-bar">
+            {placementError && (
+              <span
+                style={{
+                  color: 'var(--danger)',
+                  fontSize: '0.78rem',
+                  maxWidth: '320px',
+                  whiteSpace: 'normal',
+                  textAlign: 'right',
+                  paddingRight: '0.5rem',
+                  lineHeight: 1.3,
+                }}
+                role="alert"
+              >
+                {placementError}
+              </span>
+            )}
             <button type="button" onClick={cancelPlacement} disabled={applying}>
               Cancel
             </button>
