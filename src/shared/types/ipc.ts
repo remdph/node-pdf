@@ -57,6 +57,13 @@ export interface HomeFolder {
   path: string;
 }
 
+export interface UpdateInfo {
+  /** Latest release version found on GitHub (no `v` prefix). */
+  version: string;
+  /** Release page URL (`html_url` from the GitHub API). */
+  htmlUrl: string;
+}
+
 export interface IpcApi {
   /** Host OS identifier — same shape as Node's `process.platform`. */
   platform: NodeJS.Platform;
@@ -73,6 +80,11 @@ export interface IpcApi {
      * renderer can open the in-app About dialog (clickable links etc.)
      * instead of the plain-text native panel. */
     onShowAbout(handler: () => void): () => void;
+    /** Push fired by the Linux GitHub-Releases checker when it finds a
+     * version newer than `app.getVersion()`. The renderer surfaces a
+     * banner that links to the release page. Win/macOS use the native
+     * Squirrel auto-updater path instead, so this never fires there. */
+    onUpdateAvailable(handler: (info: UpdateInfo) => void): () => void;
   };
   pdf: {
     /** Show the system "Open PDF" dialog. Pass `defaultPath` to root the
@@ -158,6 +170,7 @@ export const IPC_CHANNELS = {
   app: {
     version: 'app:version',
     showAbout: 'app:show-about',
+    updateAvailable: 'app:update-available',
   },
   pdf: {
     open: 'pdf:open',

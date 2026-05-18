@@ -36,7 +36,18 @@ export function HomeView(): JSX.Element {
   return (
     <div className="home">
       <header className="home-welcome">
-        <img src={iconUrl} alt="" className="home-welcome-icon" aria-hidden draggable={false} />
+        {/* macOS keeps the brand icon here because the titlebar slot is
+         * reserved for the native traffic lights and shows no brand.
+         * Win/Linux already have the brand in the titlebar, so we swap
+         * in a neutral info glyph instead — keeps the visual rhythm of
+         * the header without duplicating the logo. */}
+        {ipc.platform === 'darwin' ? (
+          <img src={iconUrl} alt="" className="home-welcome-icon" aria-hidden draggable={false} />
+        ) : (
+          <span className="home-welcome-icon home-welcome-icon-info" aria-hidden>
+            <InfoIcon />
+          </span>
+        )}
         <span className="home-welcome-text">Welcome to NodePDF</span>
         <button
           type="button"
@@ -657,6 +668,16 @@ function formatOpened(iso: string): string {
 }
 
 /* --- Inline icons ------------------------------------------------------- */
+
+function InfoIcon(): JSX.Element {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <circle cx="8" cy="8" r="6.4" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M8 7v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="8" cy="4.8" r="0.85" fill="currentColor" />
+    </svg>
+  );
+}
 
 function IconClock(): JSX.Element {
   return (

@@ -10,6 +10,7 @@ import {
   SIGNATURE_SCHEME_PRIVILEGES,
 } from './signatures/protocol.js';
 import { registerStampProtocol, STAMP_SCHEME_PRIVILEGES } from './stamps/protocol.js';
+import { setupUpdater } from './updater.js';
 
 // Windows installer entry; resolves before app is "ready" when Squirrel kicks in.
 import electronSquirrelStartup from 'electron-squirrel-startup';
@@ -118,6 +119,11 @@ app.whenReady().then(() => {
   // this declaratively via Info.plist).
   registerFileAssociations();
   createMainWindow();
+
+  // Two-track updater: Squirrel auto-update on Win/macOS via
+  // update.electronjs.org, GitHub-API check + renderer banner on Linux.
+  // No-op in dev (gated by app.isPackaged inside).
+  setupUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

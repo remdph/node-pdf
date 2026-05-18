@@ -1,7 +1,7 @@
 {
   "name": "node-pdf",
   "productName": "NodePDF",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Electron-based PDF viewer with a custom titlebar and tabbed interface.",
   "main": ".vite/build/main.js",
@@ -34,6 +34,7 @@
     "react-pdf": "^10.4.1",
     "react-rnd": "^10.5.3",
     "react-virtuoso": "^4.18.7",
+    "update-electron-app": "^3.2.0",
     "zustand": "^5.0.0"
   },
   "pnpm": {

@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/remdph/node-pdf/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.2.0-cbd5e1?style=flat-square" /></a>
+  <a href="https://github.com/remdph/node-pdf/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.3.0-cbd5e1?style=flat-square" /></a>
   <img alt="License" src="https://img.shields.io/badge/license-MIT-cbd5e1?style=flat-square" />
   <img alt="Platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-cbd5e1?style=flat-square" />
 </p>
@@ -48,7 +48,7 @@
 ## Features
 
 ### Reading
-- **Tabbed viewer** — open many PDFs side by side. Each tab keeps its scroll position, zoom and search across switches.
+- **Tabbed viewer** — open many PDFs side by side. Each tab keeps its scroll position, zoom and search across switches. Tabs size to the title text (short names get narrower tabs) and can be **dragged to reorder**.
 - **Overflow tab menu** — when tabs no longer fit the titlebar, the rest fold into a dropdown (active tab stays visible).
 - **Outline panel** — opens automatically for documents that have a table of contents; click any entry to jump.
 - **Thumbnails sidebar** — virtualized previews with active-page tracking.
@@ -56,7 +56,7 @@
 - **Recents** — visual carousel of recently opened files with cached thumbnails and right-click context menu.
 
 ### Navigation
-- **Paginator** in the toolbar: prev/next buttons, type-and-Enter page input, current/total indicator.
+- **Paginator** in the toolbar: first / prev / next / last page buttons, type-and-Enter page input, current/total indicator.
 - **Zoom controls**: in / out / reset / fit-width, plus `Ctrl + wheel` over the document.
 - **Status bar** at the bottom shows current page, total pages, zoom level and file size on disk.
 
@@ -85,6 +85,10 @@
   - **Trust** — chain verified against the bundled Mozilla CA root store (121 roots). Self-signed certs get a yellow badge; CA-issued ones get the "Trusted" badge.
   - **Revocation** — live OCSP responder check (only when the cert advertises an AIA URL).
 - **Legacy format support** — reads `adbe.pkcs7.detached`, `adbe.pkcs7.sha1`, `ETSI.CAdES.detached`, and the pre-PKCS#7 `adbe.x509.rsa_sha1` (raw RSA + cert in `/Cert`).
+
+### Updates (new in 0.3.0)
+- **Windows / macOS** — silent auto-update via [`update-electron-app`](https://github.com/electron/update-electron-app), which talks to [update.electronjs.org](https://update.electronjs.org) (a free hosted proxy by the Electron team over this repo's GitHub Releases). New builds download in the background and a native "Restart to update" dialog appears when ready. Checks every hour.
+- **Linux** — the same hosted service intentionally doesn't cover Linux (distros own their update flow). Instead the app polls the GitHub Releases API directly and surfaces a dismissable bottom-right banner with a "View release" link to the new release page. AUR users get updates automatically via `pacman -Syu` / their AUR helper; `.deb` / `.rpm` / AppImage users see the notification and download manually.
 
 ### Printing
 - **Print dialog** with first-page preview and printer selection.
@@ -166,7 +170,7 @@ src/
   shared/      Types and IPC channel constants shared between main and renderer
 ```
 
-## Roadmap (post-0.2.0)
+## Roadmap (post-0.3.0)
 
 - **OS trust store integration** — honor enterprise / government CAs the user has trusted at the OS level (currently only the bundled Mozilla list). Requires per-platform native bindings (Linux NSS, macOS Security, Windows WinTrust).
 - **PAdES-LTA (archive timestamps)** — periodic timestamps over the `/DSS` to keep long-term signatures verifiable for decades.

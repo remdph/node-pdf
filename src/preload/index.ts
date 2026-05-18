@@ -7,6 +7,7 @@ import type {
   PrinterInfo,
   PrintOptions,
   ProtectInput,
+  UpdateInfo,
 } from '~shared/types/ipc.js';
 import type {
   Certificate,
@@ -52,6 +53,8 @@ const api = {
     version: () => invoke<string>(IPC_CHANNELS.app.version),
     onShowAbout: (handler: () => void) =>
       subscribe<void>(IPC_CHANNELS.app.showAbout, () => handler()),
+    onUpdateAvailable: (handler: (info: UpdateInfo) => void) =>
+      subscribe<UpdateInfo>(IPC_CHANNELS.app.updateAvailable, handler),
   },
   pdf: {
     open: (defaultPath?: string) =>

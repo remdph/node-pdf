@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { HomeView } from './components/HomeView.js';
 import { PdfView } from './components/PdfView.js';
 import { TitleBar } from './components/TitleBar.js';
+import { UpdateBanner } from './components/UpdateBanner.js';
 import { ipc } from './lib/ipc.js';
 import { useTabsStore } from './stores/tabs.js';
 
@@ -66,6 +67,7 @@ export function App(): JSX.Element {
           {showHome && <HomeView />}
         </div>
       </div>
+      <UpdateBanner />
     </main>
   );
 }

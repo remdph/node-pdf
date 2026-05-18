@@ -602,6 +602,16 @@ button.primary:hover {
   pointer-events: none;
 }
 
+/* SVG-glyph variant (Win/Linux fallback when the brand img isn't shown).
+ * Wraps an inline icon and gives it the same footprint as the brand
+ * image so the header layout stays identical across platforms. */
+.home-welcome-icon-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+}
+
 .home-welcome-text {
   font-size: 0.95rem;
   font-weight: 600;
@@ -3183,4 +3193,115 @@ button.primary:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* --- Update banner (Linux GitHub-Releases checker) ---------------------
+ * Bottom-right toast that surfaces when the main process reports a
+ * newer release on GitHub. Win/macOS skip this — `update-electron-app`
+ * shows its own native dialog. */
+.update-banner {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.85rem;
+  min-width: 280px;
+  max-width: 360px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  color: var(--fg);
+  font-size: 0.82rem;
+  /* Soft slide-in so the toast doesn't pop abruptly when the IPC push
+   * lands a few seconds into the session. */
+  animation: update-banner-in 220ms ease-out;
+}
+
+@keyframes update-banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.update-banner-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  color: #6aa3ff;
+  background: rgba(106, 163, 255, 0.12);
+  border-radius: 6px;
+}
+
+.update-banner-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.update-banner-title {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.update-banner-sub {
+  font-size: 0.74rem;
+  color: var(--fg-muted);
+}
+
+.update-banner-cta {
+  flex-shrink: 0;
+  padding: 0.35rem 0.6rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--fg);
+  font-size: 0.74rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.update-banner-cta:hover {
+  background: rgba(106, 163, 255, 0.14);
+  border-color: #6aa3ff;
+}
+
+.update-banner-close {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 0;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.update-banner-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
 }
