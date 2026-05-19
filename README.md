@@ -206,7 +206,11 @@ src/
 
 ## License
 
-MIT © Rafael Maldonado
+[MIT](LICENSE) © 2026 Rafael Maldonado.
+
+The full license text lives in the [`LICENSE`](LICENSE) file at the repo root
+and is also linked from the in-app **About NodePDF** dialog. NodePDF is free
+software with no warranty — see the LICENSE for the standard MIT disclaimer.
 
 ## Support the project
 

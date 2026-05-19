@@ -284,11 +284,16 @@ body,
   color: var(--accent);
 }
 
-/* Optical nudge: the home glyph and the about glyph sit a hair higher
- * than the tab text/window controls when centered, so drop them ~2px. */
-.titlebar-leading > svg,
-.titlebar-btn-about > svg {
+/* Optical nudge: the home glyph sits a hair higher than the tab text/
+ * window controls when centered, so drop it ~2px. */
+.titlebar-leading > svg {
   transform: translateY(2px);
+}
+
+/* About glyph is rendered closer to the cap-height of its viewBox than
+ * the home one, so 1px is enough. */
+.titlebar-btn-about > svg {
+  transform: translateY(1px);
 }
 
 .titlebar-tabs {
@@ -380,6 +385,13 @@ body:not(.platform-darwin) .tab svg {
  * the title baseline. */
 body:not(.platform-darwin) .tab > svg {
   transform: translateY(-2px);
+}
+
+/* macOS only: drop the settings cogwheel 2px to sit on the same visual
+ * baseline as the other titlebar glyphs (the lucide gear renders higher
+ * than the about/home glyphs because of its 24x24 viewBox). */
+body.platform-darwin .titlebar-btn-settings > svg {
+  transform: translateY(2px);
 }
 
 /* --- Tabs --------------------------------------------------------------- */

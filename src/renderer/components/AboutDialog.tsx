@@ -9,6 +9,7 @@ interface AboutDialogProps {
 
 const GITHUB_URL = 'https://github.com/remdph/node-pdf';
 const DONATE_URL = 'https://www.buymeacoffee.com/remdph';
+const LICENSE_URL = 'https://github.com/remdph/node-pdf/blob/main/LICENSE';
 
 export function AboutDialog({ onClose }: AboutDialogProps): JSX.Element {
   const [version, setVersion] = useState<string>('');
@@ -116,6 +117,29 @@ export function AboutDialog({ onClose }: AboutDialogProps): JSX.Element {
                 />
               </svg>
               Buy me a coffee
+            </a>
+            <a
+              href={LICENSE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="about-dialog-link"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden fill="none">
+                <path
+                  d="M4 1.5h5.5L13 5v9.5H4z"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinejoin="round"
+                />
+                <path d="M9.5 1.5V5H13" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                <path
+                  d="M6 8.5h5M6 11h5"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinecap="round"
+                />
+              </svg>
+              View License (MIT)
             </a>
           </div>
         </div>
