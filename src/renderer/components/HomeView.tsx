@@ -5,6 +5,7 @@ import iconUrl from '../assets/icon.png';
 import { ipc } from '../lib/ipc.js';
 import { useRecentThumb } from '../lib/useRecentThumb.js';
 import { useTabsStore, type RecentDoc } from '../stores/tabs.js';
+import { UpdaterStatus } from './UpdaterStatus.js';
 
 type ViewMode = 'list' | 'grid';
 type HomeSection = 'recent' | 'starred' | 'computer';
@@ -87,6 +88,7 @@ export function HomeView(): JSX.Element {
             </li>
           </ul>
         </nav>
+        <UpdaterStatus />
       </aside>
 
       <main className="home-main">

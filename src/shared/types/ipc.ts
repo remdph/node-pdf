@@ -57,11 +57,45 @@ export interface HomeFolder {
   path: string;
 }
 
-export interface UpdateInfo {
-  /** Latest release version found on GitHub (no `v` prefix). */
-  version: string;
-  /** Release page URL (`html_url` from the GitHub API). */
-  htmlUrl: string;
+/**
+ * Lifecycle of the auto-updater, surfaced to the renderer so the
+ * sidebar can show a persistent status row and the toast banner can
+ * react to transitions. See src/main/updater.ts for how each platform
+ * walks the machine.
+ *
+ *   idle      → before any check has finished (initial app load)
+ *   checking  → request to GitHub / update.electronjs.org is in flight
+ *   current   → confirmed: no newer release than `app.getVersion()`
+ *   available → newer release exists.
+ *               Win/macOS: download is already in progress in the
+ *                 background; we'll transition to `ready` when done.
+ *               Linux:   final state — there is nothing to download
+ *                 in-app; user must update through their package manager
+ *                 or the release page.
+ *   ready     → Win/macOS only: bits downloaded, click → quitAndInstall.
+ *   error     → most recent check failed; surfaces as a muted status.
+ */
+export type UpdaterStatus =
+  | 'idle'
+  | 'checking'
+  | 'current'
+  | 'available'
+  | 'ready'
+  | 'error';
+
+export interface UpdaterState {
+  status: UpdaterStatus;
+  /** Version we're running right now, included on every push so the
+   * renderer can render the "Up to date · v0.3.0" label without an
+   * extra IPC round-trip. */
+  currentVersion: string;
+  /** Latest version found on GitHub. Set when status is `available`,
+   * `ready`, or `current` (in which case it equals `currentVersion`). */
+  latestVersion?: string;
+  /** Release page URL — used by the Linux "View release" link. */
+  htmlUrl?: string;
+  /** Human-readable error from the last failed check. */
+  error?: string;
 }
 
 export interface IpcApi {
@@ -80,11 +114,20 @@ export interface IpcApi {
      * renderer can open the in-app About dialog (clickable links etc.)
      * instead of the plain-text native panel. */
     onShowAbout(handler: () => void): () => void;
-    /** Push fired by the Linux GitHub-Releases checker when it finds a
-     * version newer than `app.getVersion()`. The renderer surfaces a
-     * banner that links to the release page. Win/macOS use the native
-     * Squirrel auto-updater path instead, so this never fires there. */
-    onUpdateAvailable(handler: (info: UpdateInfo) => void): () => void;
+    /** Snapshot the current updater state. Called once on mount so the
+     * UI can render the right status without waiting for the next
+     * state-change push (which may not happen for a long time once
+     * `current` is reached). */
+    updaterState(): Promise<UpdaterState>;
+    /** Push fired every time the updater transitions between statuses
+     * (see UpdaterStatus). Replaces the previous one-shot
+     * `update-available` event. */
+    onUpdaterStateChange(handler: (state: UpdaterState) => void): () => void;
+    /** Win/macOS only: triggers `autoUpdater.quitAndInstall()`, which
+     * closes the app and relaunches it from the just-downloaded
+     * Squirrel update. No-op when status !== 'ready' or when running
+     * on Linux. */
+    installUpdate(): Promise<void>;
   };
   pdf: {
     /** Show the system "Open PDF" dialog. Pass `defaultPath` to root the
@@ -170,7 +213,9 @@ export const IPC_CHANNELS = {
   app: {
     version: 'app:version',
     showAbout: 'app:show-about',
-    updateAvailable: 'app:update-available',
+    updaterStateGet: 'app:updater-state-get',
+    updaterStateChange: 'app:updater-state-change',
+    updaterInstall: 'app:updater-install',
   },
   pdf: {
     open: 'pdf:open',

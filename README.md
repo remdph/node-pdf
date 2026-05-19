@@ -11,9 +11,32 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/remdph/node-pdf/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.3.0-cbd5e1?style=flat-square" /></a>
+  <a href="https://github.com/remdph/node-pdf/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.3.1-cbd5e1?style=flat-square" /></a>
   <img alt="License" src="https://img.shields.io/badge/license-MIT-cbd5e1?style=flat-square" />
   <img alt="Platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-cbd5e1?style=flat-square" />
+</p>
+
+<p align="center"><strong>Download the latest release</strong></p>
+
+<!--
+  Each button links to /releases/latest, which redirects to whatever the
+  most recent release tag is. Filenames embed the version (e.g. NodePDF-
+  0.3.0.Setup.exe) so we can't use /releases/latest/download/<file>
+  shortcuts — the user lands on the release page and picks the asset
+  matching the badge they clicked.
+-->
+<p align="center">
+  <a href="https://github.com/remdph/node-pdf/releases/latest"><img alt="Download for Windows" src="https://img.shields.io/badge/Windows-0078D4?style=for-the-badge&amp;logo=windows&amp;logoColor=white" /></a>
+  &nbsp;
+  <a href="https://github.com/remdph/node-pdf/releases/latest"><img alt="Download for macOS" src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&amp;logo=apple&amp;logoColor=white" /></a>
+  &nbsp;
+  <a href="https://github.com/remdph/node-pdf/releases/latest"><img alt="Download .deb (Debian / Ubuntu)" src="https://img.shields.io/badge/.deb-A81D33?style=for-the-badge&amp;logo=debian&amp;logoColor=white" /></a>
+  &nbsp;
+  <a href="https://github.com/remdph/node-pdf/releases/latest"><img alt="Download .rpm (Fedora / openSUSE)" src="https://img.shields.io/badge/.rpm-294172?style=for-the-badge&amp;logo=fedora&amp;logoColor=white" /></a>
+  &nbsp;
+  <a href="https://aur.archlinux.org/packages/nodepdf-bin"><img alt="Install from the AUR" src="https://img.shields.io/badge/AUR-1793D1?style=for-the-badge&amp;logo=archlinux&amp;logoColor=white" /></a>
+  &nbsp;
+  <a href="https://github.com/remdph/node-pdf/releases/latest"><img alt="Download AppImage" src="https://img.shields.io/badge/AppImage-6B7280?style=for-the-badge" /></a>
 </p>
 
 ---

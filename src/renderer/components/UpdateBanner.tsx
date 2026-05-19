@@ -1,35 +1,59 @@
 import { useEffect, useState } from 'react';
 
 import { ipc } from '../lib/ipc.js';
-import type { UpdateInfo } from '~shared/types/ipc.js';
+import type { UpdaterState } from '~shared/types/ipc.js';
 
 const DISMISSED_KEY = 'nodepdf:update-dismissed-version';
 
 /**
- * Bottom-right corner toast surfaced when the Linux GitHub-Releases
- * checker (see src/main/updater.ts) reports a version newer than the
- * running build. Win/macOS skip this — the native Squirrel update flow
- * shows its own dialog. The user can dismiss a specific version; we
- * record it in localStorage so the next check for the SAME version
- * stays silent. A newer version overrides the dismissal automatically
- * since we only suppress when latest === dismissed.
+ * Bottom-right toast that surfaces actionable updater transitions:
+ *   - Linux `available`  → "View release" link (the user has to update
+ *                          through their package manager or the release).
+ *   - Win/Mac `ready`    → "Restart and install" button (calls
+ *                          autoUpdater.quitAndInstall via IPC).
+ *   - Anything else      → hidden (the sidebar indicator handles
+ *                          checking/current/error visibility).
+ *
+ * The home sidebar's `UpdaterStatus` component is the always-visible
+ * status row; this banner is the transient call-to-action shown even
+ * when the user is reading a PDF and the home sidebar isn't visible.
+ *
+ * Dismissal is persisted per-version in localStorage — a newer version
+ * supersedes the dismissal automatically.
  */
 export function UpdateBanner(): JSX.Element | null {
-  const [info, setInfo] = useState<UpdateInfo | null>(null);
+  const [state, setState] = useState<UpdaterState | null>(null);
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(
+    () => localStorage.getItem(DISMISSED_KEY),
+  );
 
   useEffect(() => {
-    return ipc.app.onUpdateAvailable((next) => {
-      const dismissed = localStorage.getItem(DISMISSED_KEY);
-      if (dismissed === next.version) return;
-      setInfo(next);
-    });
+    void ipc.app.updaterState().then(setState);
+    return ipc.app.onUpdaterStateChange(setState);
   }, []);
 
-  if (!info) return null;
+  if (!state) return null;
+
+  const isLinux = ipc.platform === 'linux';
+  const shouldShow =
+    (state.status === 'ready' && !isLinux) ||
+    (state.status === 'available' && isLinux);
+  if (!shouldShow) return null;
+
+  const targetVersion = state.latestVersion ?? '';
+  if (targetVersion && dismissedVersion === targetVersion) return null;
 
   const dismiss = () => {
-    localStorage.setItem(DISMISSED_KEY, info.version);
-    setInfo(null);
+    if (targetVersion) {
+      localStorage.setItem(DISMISSED_KEY, targetVersion);
+      setDismissedVersion(targetVersion);
+    } else {
+      setState(null);
+    }
+  };
+
+  const onInstall = () => {
+    void ipc.app.installUpdate();
   };
 
   return (
@@ -38,22 +62,28 @@ export function UpdateBanner(): JSX.Element | null {
         <DownloadIcon />
       </div>
       <div className="update-banner-body">
-        <div className="update-banner-title">Update available</div>
+        <div className="update-banner-title">
+          {state.status === 'ready' ? 'Ready to install' : 'Update available'}
+        </div>
         <div className="update-banner-sub">
-          NodePDF v{info.version} is out.
+          NodePDF v{targetVersion || '?'}{' '}
+          {state.status === 'ready' ? 'has been downloaded.' : 'is out.'}
         </div>
       </div>
-      {/* target=_blank routes through windows.ts:68 setWindowOpenHandler,
-       * which calls shell.openExternal — keeps the link out of an
-       * Electron BrowserWindow. */}
-      <a
-        className="update-banner-cta"
-        href={info.htmlUrl}
-        target="_blank"
-        rel="noreferrer"
-      >
-        View release
-      </a>
+      {state.status === 'ready' ? (
+        <button type="button" className="update-banner-cta" onClick={onInstall}>
+          Restart and install
+        </button>
+      ) : (
+        <a
+          className="update-banner-cta"
+          href={state.htmlUrl ?? '#'}
+          target="_blank"
+          rel="noreferrer"
+        >
+          View release
+        </a>
+      )}
       <button
         type="button"
         className="update-banner-close"

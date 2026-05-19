@@ -185,6 +185,14 @@ export function TitleBar(): JSX.Element {
         </svg>
       </button>
 
+      {/* Right-side bevel separator — rendered on ALL platforms (including
+       * macOS, which has no left separator because the traffic-light slot
+       * already partitions that side). Together with the home button's
+       * symmetric 0.4rem horizontal margin, this keeps the home button
+       * visually centered between its left neighbor (left sep on Win/Linux,
+       * traffic-light slot on macOS) and this separator. */}
+      <span className="titlebar-sep titlebar-sep-right" aria-hidden />
+
       <div className="titlebar-tabs" ref={tabsContainerRef}>
         {visibleTabs.map((tab) => (
           <TabItem

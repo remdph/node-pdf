@@ -654,6 +654,10 @@ button.primary:hover {
   background: var(--bg);
   padding: 1.5rem 0.75rem;
   overflow-y: auto;
+  /* Stack nav on top, updater status pinned to the bottom via the
+   * trailing `margin-top: auto` on `.updater-status`. */
+  display: flex;
+  flex-direction: column;
 }
 
 .home-nav {
@@ -1895,6 +1899,17 @@ button.primary:hover {
   -webkit-app-region: no-drag;
   app-region: no-drag;
   margin-right: 0;
+}
+
+/* Mirror modifier for the separator on the RIGHT of the home button.
+ * Mirrors the left version: left margin is 0 so only the home button's
+ * own right margin (0.4rem) sets the gap (keeping the button centered
+ * between left and right separators), and right margin is the small
+ * gap to the first tab. Specificity matches `.titlebar-sep` and this
+ * rule sits after it, so the cascade picks these margin values. */
+.titlebar-sep-right {
+  margin-left: 0;
+  margin-right: 0.4rem;
 }
 
 .pdf-paginator-form {
@@ -3304,4 +3319,130 @@ button.primary:hover {
 .update-banner-close:hover {
   background: rgba(255, 255, 255, 0.08);
   color: var(--fg);
+}
+
+/* --- Updater status row (home sidebar footer) --------------------------
+ * Persistent status pinned to the bottom of the home sidebar. Three
+ * visual variants driven by class modifiers:
+ *   .updater-status-muted   → idle/current/error (no call-to-action)
+ *   .updater-status-accent  → available/ready (download icon + action)
+ * margin-top: auto pushes it to the sidebar footer regardless of nav
+ * list height. */
+.updater-status {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  /* Sit a hair below the nav list with a small visual breath. */
+  margin-bottom: 0.25rem;
+  /* Small text so the row stays unobtrusive when nothing's happening. */
+  font-size: 0.72rem;
+  line-height: 1.2;
+  min-height: 32px;
+}
+
+.updater-status-muted {
+  color: var(--fg-muted);
+}
+
+.updater-status-accent {
+  color: var(--fg);
+  border-color: rgba(106, 163, 255, 0.35);
+  background: rgba(106, 163, 255, 0.08);
+}
+
+.updater-status-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.updater-status-accent .updater-status-icon {
+  color: #6aa3ff;
+}
+
+.updater-status-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.updater-status-title {
+  font-weight: 500;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.updater-status-sub {
+  font-size: 0.68rem;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.updater-status-action {
+  flex-shrink: 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.updater-status-action:hover {
+  background: rgba(106, 163, 255, 0.14);
+  border-color: #6aa3ff;
+}
+
+.updater-status-action-primary {
+  background: #6aa3ff;
+  border-color: #6aa3ff;
+  color: #0f1115;
+}
+
+.updater-status-action-primary:hover {
+  background: #82b4ff;
+  border-color: #82b4ff;
+  color: #0f1115;
+}
+
+.updater-status-action-muted {
+  cursor: default;
+  color: var(--fg-muted);
+  border-color: transparent;
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.updater-status-action-muted:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+.updater-spinner {
+  animation: updater-spin 1s linear infinite;
+}
+
+@keyframes updater-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

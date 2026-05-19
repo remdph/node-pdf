@@ -1,8 +1,9 @@
-import { app, BrowserWindow } from 'electron';
+import { app, autoUpdater, BrowserWindow } from 'electron';
 import { updateElectronApp, UpdateSourceType } from 'update-electron-app';
 
 import { IPC_CHANNELS } from '~shared/types/ipc.js';
-import type { UpdateInfo } from '~shared/types/ipc.js';
+import type { UpdaterState, UpdaterStatus } from '~shared/types/ipc.js';
+import { handle } from './ipc/register.js';
 
 const GH_OWNER = 'remdph';
 const GH_REPO = 'node-pdf';
@@ -11,27 +12,58 @@ const GH_REPO = 'node-pdf';
  * re-checks pick up releases shipped mid-session without the user
  * relaunching. Generous enough to stay well under the 60 req/hour
  * unauthenticated rate limit even with many open windows. */
-const LINUX_RECHECK_MS = 4 * 60 * 60 * 1000; // 4 hours
+const LINUX_RECHECK_MS = 4 * 60 * 60 * 1000;
+
+// Module-level state. The renderer reads it via `app:updater-state-get`
+// (snapshot) and `app:updater-state-change` (push). Always exported as
+// a defensive copy through getState() so consumers can't mutate it.
+let state: UpdaterState = {
+  status: 'idle',
+  currentVersion: '0.0.0', // overwritten in setupUpdater() once app is ready
+};
+
+function setState(patch: Partial<UpdaterState>): void {
+  const next: UpdaterState = { ...state, ...patch };
+  // Drop fields that no longer apply to the new status so the renderer
+  // doesn't see stale values (e.g. an htmlUrl after we transition back
+  // to `current`).
+  if (next.status !== 'available' && next.status !== 'ready') {
+    delete next.htmlUrl;
+    if (next.status !== 'current') delete next.latestVersion;
+  }
+  if (next.status !== 'error') delete next.error;
+  state = next;
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send(IPC_CHANNELS.app.updaterStateChange, state);
+  }
+}
+
+function getState(): UpdaterState {
+  return { ...state };
+}
 
 /**
- * Two-track updater:
- *  - Win + macOS use `update-electron-app`, which calls
- *    update.electronjs.org (an Electron-team-hosted proxy on top of the
- *    repo's GitHub Releases). It downloads the new artifact via Squirrel
- *    in the background and triggers a native "Restart to update" dialog.
- *  - Linux is intentionally not supported by that service (distros own
- *    update flow via apt / dnf / pacman / AppImage). We instead poll the
- *    GitHub API for the latest release and forward the result to the
- *    renderer as an `app:update-available` push, which surfaces a
- *    dismissable banner with a "View release" link.
+ * Two-track updater + state machine:
  *
- * Called once from main after the first window is created. Bails in dev
- * (no point in checking when the version is the working-tree version).
+ *  - Win + macOS: `update-electron-app` configures Electron's
+ *    `autoUpdater` to talk to update.electronjs.org (an Electron-team-
+ *    hosted proxy on top of this repo's GitHub Releases). Download is
+ *    automatic in the background; install is gated by the user's
+ *    explicit click on our own "Restart and install" button — we set
+ *    `notifyUser: false` so the library doesn't pop the native dialog,
+ *    and we drive the lifecycle ourselves by listening to the same
+ *    autoUpdater events the library would.
+ *  - Linux: not supported by update.electronjs.org (distros own update
+ *    flow). We poll the GitHub Releases API and update state directly.
+ *
+ * Both tracks land in the same `UpdaterState`, which the renderer
+ * consumes from the home sidebar indicator (persistent status) and the
+ * toast banner (transient call-to-action).
  *
  * Debug overrides via NODEPDF_UPDATER_DEBUG env var:
- *   - `fake`         → broadcast a synthetic UpdateInfo (v99.0.0) ~1.5s
- *                      after start, no network, bypasses packaged gate.
- *                      Use to iterate on the banner UI.
+ *   - `fake`         → push a synthetic `available` state ~1.5s after
+ *                      start, no network, bypasses packaged gate.
+ *                      Use to iterate on the sidebar / banner UI.
  *   - `<semver>` like `0.1.0` → run the real Linux GH-API check using
  *                      this string as the "current version" for the
  *                      comparison, bypassing the packaged gate. Use to
@@ -39,12 +71,16 @@ const LINUX_RECHECK_MS = 4 * 60 * 60 * 1000; // 4 hours
  *                      package.json or shipping a new release.
  */
 export function setupUpdater(): void {
+  setState({ currentVersion: app.getVersion() });
+  registerUpdaterIpc();
+
   const debug = process.env.NODEPDF_UPDATER_DEBUG?.trim();
 
   if (debug === 'fake' || debug === '1') {
     setTimeout(() => {
-      broadcastUpdateAvailable({
-        version: '99.0.0',
+      setState({
+        status: 'available',
+        latestVersion: '99.0.0',
         htmlUrl: `https://github.com/${GH_OWNER}/${GH_REPO}/releases/latest`,
       });
     }, 1500);
@@ -52,28 +88,17 @@ export function setupUpdater(): void {
   }
 
   const debugCurrent = debug && /^\d+\.\d+\.\d+/.test(debug) ? debug : undefined;
-
-  if (!app.isPackaged && !debugCurrent) return;
+  if (!app.isPackaged && !debugCurrent) {
+    // Dev build: there's no point checking against GitHub when the
+    // running version IS the working tree. Settle into `current` so the
+    // sidebar shows "Up to date · vX.Y.Z" instead of an infinite
+    // spinner from the initial `idle` state.
+    setState({ status: 'current', latestVersion: state.currentVersion });
+    return;
+  }
 
   if ((process.platform === 'win32' || process.platform === 'darwin') && !debugCurrent) {
-    try {
-      updateElectronApp({
-        updateSource: {
-          type: UpdateSourceType.ElectronPublicUpdateService,
-          repo: `${GH_OWNER}/${GH_REPO}`,
-        },
-        updateInterval: '1 hour',
-        notifyUser: true,
-        logger: {
-          log: (m) => console.log('[updater]', m),
-          info: (m) => console.info('[updater]', m),
-          warn: (m) => console.warn('[updater]', m),
-          error: (m) => console.error('[updater]', m),
-        },
-      });
-    } catch (err) {
-      console.error('[updater] failed to start auto-updater', err);
-    }
+    setupSquirrel();
     return;
   }
 
@@ -86,32 +111,88 @@ export function setupUpdater(): void {
   }
 }
 
+function setupSquirrel(): void {
+  // Wire our state machine to autoUpdater BEFORE update-electron-app
+  // registers its feed URL, so we don't miss the first event burst.
+  autoUpdater.on('checking-for-update', () => setState({ status: 'checking' }));
+  autoUpdater.on('update-available', () => {
+    // At this point the download just started — autoUpdater always
+    // downloads automatically. We surface 'available' and will flip to
+    // 'ready' once the download is on disk.
+    setState({ status: 'available' });
+  });
+  autoUpdater.on('update-not-available', () =>
+    setState({ status: 'current', latestVersion: state.currentVersion }),
+  );
+  // The exact shape of release info passed here varies by platform.
+  // We only need the version string, which Squirrel publishes as a
+  // separate arg on macOS and inside an info object on Windows.
+  autoUpdater.on(
+    'update-downloaded',
+    (_event, releaseNotes: string, releaseName: string) => {
+      const version = pickVersionFromSquirrel(releaseName, releaseNotes);
+      setState({ status: 'ready', latestVersion: version ?? state.latestVersion });
+    },
+  );
+  autoUpdater.on('error', (err) => {
+    setState({ status: 'error', error: err?.message ?? 'Update check failed' });
+  });
+
+  try {
+    updateElectronApp({
+      updateSource: {
+        type: UpdateSourceType.ElectronPublicUpdateService,
+        repo: `${GH_OWNER}/${GH_REPO}`,
+      },
+      updateInterval: '1 hour',
+      // We render the "ready to install" confirmation ourselves (sidebar
+      // indicator + banner), so suppress the library's native dialog.
+      // The library still calls checkForUpdates on a timer for us.
+      notifyUser: false,
+      logger: {
+        log: (m) => console.log('[updater]', m),
+        info: (m) => console.info('[updater]', m),
+        warn: (m) => console.warn('[updater]', m),
+        error: (m) => console.error('[updater]', m),
+      },
+    });
+  } catch (err) {
+    console.error('[updater] failed to start auto-updater', err);
+    setState({ status: 'error', error: (err as Error)?.message ?? 'Setup failed' });
+  }
+}
+
 async function runLinuxCheck(fakeCurrent?: string): Promise<void> {
+  setState({ status: 'checking' });
   try {
     const info = await fetchLatestRelease();
     if (!info) {
-      if (fakeCurrent) console.warn('[updater] debug: fetch returned no release');
+      // Fetch failed or returned no usable release — stay in 'current'
+      // rather than 'error' so we don't scare the user with a red
+      // status row over a transient network blip.
+      setState({ status: 'current', latestVersion: state.currentVersion });
       return;
     }
     const current = fakeCurrent ?? app.getVersion();
     if (!isNewerVersion(info.version, current)) {
-      if (fakeCurrent) {
-        console.info(
-          `[updater] debug: latest ${info.version} not newer than ${current}; no broadcast`,
-        );
-      }
+      setState({ status: 'current', latestVersion: info.version });
       return;
     }
     if (fakeCurrent) {
-      console.info(`[updater] debug: broadcasting ${info.version} (vs fake current ${current})`);
+      console.info(`[updater] debug: ${info.version} > fake current ${current}`);
     }
-    broadcastUpdateAvailable(info);
+    setState({
+      status: 'available',
+      latestVersion: info.version,
+      htmlUrl: info.htmlUrl,
+    });
   } catch (err) {
     console.error('[updater] linux check failed', err);
+    setState({ status: 'error', error: (err as Error)?.message ?? 'Network error' });
   }
 }
 
-async function fetchLatestRelease(): Promise<UpdateInfo | null> {
+async function fetchLatestRelease(): Promise<{ version: string; htmlUrl: string } | null> {
   const url = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/releases/latest`;
   const res = await fetch(url, {
     headers: {
@@ -126,7 +207,12 @@ async function fetchLatestRelease(): Promise<UpdateInfo | null> {
     console.warn('[updater] github API responded', res.status, res.statusText);
     return null;
   }
-  const body = (await res.json()) as { tag_name?: string; html_url?: string; draft?: boolean; prerelease?: boolean };
+  const body = (await res.json()) as {
+    tag_name?: string;
+    html_url?: string;
+    draft?: boolean;
+    prerelease?: boolean;
+  };
   if (body.draft || body.prerelease) return null;
   if (typeof body.tag_name !== 'string' || typeof body.html_url !== 'string') return null;
   return {
@@ -135,10 +221,29 @@ async function fetchLatestRelease(): Promise<UpdateInfo | null> {
   };
 }
 
-function broadcastUpdateAvailable(info: UpdateInfo): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send(IPC_CHANNELS.app.updateAvailable, info);
-  }
+function registerUpdaterIpc(): void {
+  handle<[], UpdaterState>(IPC_CHANNELS.app.updaterStateGet, () => getState());
+  handle<[], void>(IPC_CHANNELS.app.updaterInstall, () => {
+    if (state.status !== 'ready') return;
+    if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+    // quitAndInstall closes the app, lets Squirrel swap the bits, and
+    // relaunches. There's no "are you sure" prompt — the renderer
+    // surfaces the confirmation via its own button.
+    autoUpdater.quitAndInstall();
+  });
+}
+
+/**
+ * Squirrel's `update-downloaded` arguments differ across platforms. On
+ * macOS the second positional arg is `releaseName` containing the
+ * semver tag; on Windows the version usually shows up in
+ * `releaseNotes`. Try both, fall back to whatever's there.
+ */
+function pickVersionFromSquirrel(releaseName?: string, releaseNotes?: string): string | undefined {
+  const fromName = releaseName?.match(/\d+\.\d+\.\d+/)?.[0];
+  if (fromName) return fromName;
+  const fromNotes = releaseNotes?.match(/\d+\.\d+\.\d+/)?.[0];
+  return fromNotes;
 }
 
 /**
