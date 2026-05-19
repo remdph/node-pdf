@@ -61,7 +61,13 @@ export function App(): JSX.Element {
   // Render every open tab's PdfView side-by-side and toggle visibility via
   // CSS instead of mounting/unmounting. That way each tab keeps its parsed
   // PDF, snapshot cache, page, scroll position and zoom across tab switches.
-  const showHome = view !== 'tab' || activeId === null;
+  //
+  // Belt-and-suspenders: if there are no tabs at all, always show home
+  // regardless of `view`/`activeId`. The tabs store normalizes on
+  // rehydration to keep these in sync, but stale state from older
+  // builds (or a future code path that forgets to clear them when
+  // tabs hits zero) shouldn't leave the user staring at a blank surface.
+  const showHome = tabs.length === 0 || view !== 'tab' || activeId === null;
 
   return (
     <main className="app">

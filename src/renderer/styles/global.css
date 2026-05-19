@@ -387,6 +387,14 @@ body:not(.platform-darwin) .tab > svg {
   transform: translateY(-2px);
 }
 
+/* About glyph sits 1px lower than the rest of the non-Mac titlebar
+ * icons — the `?` strokes have a heavier visual weight at the top so
+ * the -1px shared nudge above leaves it looking slightly raised
+ * compared to the home / settings glyphs next to it. */
+body:not(.platform-darwin) .titlebar-btn-about svg {
+  transform: translateY(0);
+}
+
 /* macOS only: drop the settings cogwheel 2px to sit on the same visual
  * baseline as the other titlebar glyphs (the lucide gear renders higher
  * than the about/home glyphs because of its 24x24 viewBox). */
@@ -3442,6 +3450,108 @@ button.primary:hover {
   background: rgba(255, 107, 107, 0.14);
   border-color: rgba(255, 107, 107, 0.4);
   color: var(--danger);
+}
+
+/* AcroForm pill — same shape as .status-signed but neutral blue
+ * accent (we use the same accent color the updater "ready" CTA uses
+ * to signal "actionable form" without competing with the green
+ * signed pill for attention). */
+.status-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(106, 163, 255, 0.1);
+  border: 1px solid rgba(106, 163, 255, 0.35);
+  color: #6aa3ff;
+  font-size: 0.72rem;
+  user-select: none;
+}
+
+/* pdf.js's AnnotationLayer styling overrides.
+ *
+ * The upstream stylesheet uses CSS system colors (`CanvasText`,
+ * `Highlight`, etc.) so widgets follow the OS theme. That works in
+ * Chromium when the page itself follows the OS, but pdf.js paints
+ * form widgets directly over the rendered PDF canvas — which is
+ * effectively "always white paper" regardless of our app theme. So
+ * `CanvasText` resolves to white on a dark OS theme → white check
+ * marks on a white PDF page → invisible.
+ *
+ * Pin the inputs to dark text on the white paper surface, and force
+ * the radio/checkbox indicators to a real dark fill so the user can
+ * actually see what's selected. */
+.pdf-page .annotationLayer .textWidgetAnnotation input,
+.pdf-page .annotationLayer .textWidgetAnnotation textarea,
+.pdf-page .annotationLayer .choiceWidgetAnnotation select {
+  font: inherit;
+  color: #111;
+}
+
+/* Listbox options — also need a dark color on the (always-light) PDF
+ * page background. Some forms also style options via embedded
+ * appearance streams which we leave alone. */
+.pdf-page .annotationLayer .choiceWidgetAnnotation select option {
+  color: #111;
+  background: #fff;
+}
+
+/* Checked indicator dot/checkmark: the upstream rule sets
+ * `background-color: CanvasText` which goes white in dark-mode
+ * Chromium and disappears against the white page. Pin to near-black. */
+.pdf-page .annotationLayer .buttonWidgetAnnotation.checkBox input:checked::before,
+.pdf-page .annotationLayer .buttonWidgetAnnotation.checkBox input:checked::after,
+.pdf-page .annotationLayer .buttonWidgetAnnotation.radioButton input:checked::before {
+  background-color: #111;
+}
+
+/* Push buttons (HIDE/SHOW/RESET) inherit `color: CanvasText` too —
+ * if the PDF doesn't override it via the field's appearance, force
+ * a readable label color so the button text is visible. */
+.pdf-page .annotationLayer .buttonWidgetAnnotation.pushButton {
+  color: #111;
+}
+
+/* Signature widget: we wire a click handler that opens the digital
+ * sign dialog with the widget's rect pre-armed. Make it look clickable
+ * with a hover ring so the user knows the empty placeholder is
+ * interactive (pdf.js renders it as an inert div by default). */
+.pdf-page .annotationLayer .signatureWidgetAnnotation {
+  cursor: pointer;
+}
+.pdf-page .annotationLayer .signatureWidgetAnnotation:hover {
+  outline: 2px dashed #6aa3ff;
+  outline-offset: 1px;
+  background: rgba(106, 163, 255, 0.08);
+}
+
+/* pdf.js paints a red outline on every `:required` widget, even when
+ * the field is filled — which means a saved-and-reopened form still
+ * lights up the required fields in red. Override to the more useful
+ * HTML5 convention: red ONLY when required AND `:invalid` (empty for
+ * text, no selection for radio/checkbox/select). The outline:none
+ * rules below cancel the upstream `outline: 1.5px solid red` on
+ * `:required` alone; the `:required:invalid` rules re-introduce the
+ * red only for the empty case. */
+.pdf-page .annotationLayer .textWidgetAnnotation :is(input, textarea):required,
+.pdf-page .annotationLayer .choiceWidgetAnnotation select:required,
+.pdf-page
+  .annotationLayer
+  .buttonWidgetAnnotation:is(.checkBox, .radioButton)
+  input:required {
+  outline: none;
+}
+.pdf-page
+  .annotationLayer
+  .textWidgetAnnotation
+  :is(input, textarea):required:invalid,
+.pdf-page .annotationLayer .choiceWidgetAnnotation select:required:invalid,
+.pdf-page
+  .annotationLayer
+  .buttonWidgetAnnotation:is(.checkBox, .radioButton)
+  input:required:invalid {
+  outline: 1.5px solid #ef4444;
 }
 
 /* --- Certificate manager + digital sign dialog ------------------------- */

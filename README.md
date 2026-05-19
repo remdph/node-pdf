@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/remdph/node-pdf/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.3.3-cbd5e1?style=flat-square" /></a>
+  <a href="https://github.com/remdph/node-pdf/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.0-cbd5e1?style=flat-square" /></a>
   <img alt="License" src="https://img.shields.io/badge/license-MIT-cbd5e1?style=flat-square" />
   <img alt="Platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-cbd5e1?style=flat-square" />
 </p>
@@ -109,6 +109,16 @@
   - **Revocation** — live OCSP responder check (only when the cert advertises an AIA URL).
 - **Legacy format support** — reads `adbe.pkcs7.detached`, `adbe.pkcs7.sha1`, `ETSI.CAdES.detached`, and the pre-PKCS#7 `adbe.x509.rsa_sha1` (raw RSA + cert in `/Cert`).
 
+### Forms (new in 0.4.0)
+- **Fillable AcroForm widgets** — text inputs, checkboxes, radio groups, dropdowns, listboxes and signature fields render directly on the page as native inputs (pdf.js `renderForms`). Type, click, select — same UX as Adobe Reader for the static parts of the form.
+- **Save back to disk** — toolbar floppy button writes the filled values into the source PDF via `@cantoo/pdf-lib` + incremental update. Field types are dispatched correctly: radios resolve `{value:true}` per-widget back to their export string, listboxes translate export→display values so pdf-lib's strict option validator doesn't drop the selection on PDFs with `[exportValue, displayValue]` option pairs (govt / Apryse forms).
+- **Lock-form-before-signing** — when you fill a form and then cert-sign, the dialog offers a "Lock form fields" checkbox that flattens the form before applying the signature, so the signature can't be invalidated by a later edit. Off by default — form stays editable.
+- **Auto-save before any mutation** — if you fill fields and then stamp / visually-sign / cert-sign, the form is incrementally saved BEFORE the mutation reads the file. Without this, in-memory pdf.js form state would be lost when the renderer reloads after the stamp/sig.
+- **Click-to-sign on `/Sig` widgets** — clicking an empty signature placeholder in the PDF opens the digital sign dialog with the widget's rect pre-armed; no manual placement needed.
+- **Live "X filled" status pill** in the bottom status bar, hidden when 0; required fields outlined red only when actually empty (HTML5 `:required:invalid`, not pdf.js's "always red on required" default).
+- **Multi-layer write safety** — every form / stamp / signature write goes through a shared `safeWritePdf` helper that validates the output (PDF header + `%%EOF` + pdf-lib round-trip parse) before overwriting the source. Bad bytes never reach disk.
+- **External links open in the system browser** instead of hijacking the in-app webview.
+
 ### Updates (new in 0.3.0)
 - **Windows / macOS** — silent auto-update via [`update-electron-app`](https://github.com/electron/update-electron-app), which talks to [update.electronjs.org](https://update.electronjs.org) (a free hosted proxy by the Electron team over this repo's GitHub Releases). New builds download in the background and a native "Restart to update" dialog appears when ready. Checks every hour.
 - **Linux** — the same hosted service intentionally doesn't cover Linux (distros own their update flow). Instead the app polls the GitHub Releases API directly and surfaces a dismissable bottom-right banner with a "View release" link to the new release page. AUR users get updates automatically via `pacman -Syu` / their AUR helper; `.deb` / `.rpm` / AppImage users see the notification and download manually.
@@ -193,16 +203,15 @@ src/
   shared/      Types and IPC channel constants shared between main and renderer
 ```
 
-## Roadmap (post-0.3.0)
+## Roadmap (post-0.4.0)
 
 - **OS trust store integration** — honor enterprise / government CAs the user has trusted at the OS level (currently only the bundled Mozilla list). Requires per-platform native bindings (Linux NSS, macOS Security, Windows WinTrust).
 - **PAdES-LTA (archive timestamps)** — periodic timestamps over the `/DSS` to keep long-term signatures verifiable for decades.
 - **Hardware token support** — sign with PKCS#11 tokens (YubiKey, smart cards, HSMs) for qualified eIDAS signatures.
 - **Multi-signer workflows** — request signature from another party with field placeholders the second signer fills in.
 - **Annotation editing** (highlights, comments) via pdfjs's `AnnotationEditorLayer`.
-- **Form field filling**.
+- **Interactive form JavaScript** — basic AcroForm filling already ships (text / checkbox / radio / dropdown / listbox / signature widgets render and save back via incremental update). What's still missing is the PDF-JS execution engine: auto-calculated fields, format validators, and show/hide button actions render as inert widgets because react-pdf doesn't forward `enableScripting` + the QuickJS sandbox to pdf.js's annotation layer. Fixing this needs either a small react-pdf fork or a custom annotation layer that wires up `PDFScriptingManager` directly.
 - **Bookmarks**.
-- **Optional light theme**.
 
 ## License
 

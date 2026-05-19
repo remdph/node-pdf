@@ -888,8 +888,17 @@ export async function inspectSignatures(
   }
 
   // AcroForm lives under the catalog. Some PDFs don't have one at all,
-  // which is fine — no signatures.
-  const acroFormRef = doc.catalog.get(PDFName.of('AcroForm'));
+  // which is fine — no signatures. Guard against malformed Root entries:
+  // if pdf-lib couldn't resolve the trailer's /Root ref, `doc.catalog`
+  // can end up as a raw PDFRef (no `.get`) instead of a PDFDict, which
+  // would crash the whole IPC handler. Treat that as "no signatures".
+  let acroFormRef: unknown;
+  try {
+    if (!(doc.catalog instanceof PDFDict)) return [];
+    acroFormRef = doc.catalog.get(PDFName.of('AcroForm'));
+  } catch {
+    return [];
+  }
   if (!acroFormRef) return [];
   const acroForm =
     acroFormRef instanceof PDFRef

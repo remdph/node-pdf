@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { PDFDocument } from '@cantoo/pdf-lib';
 
 import { NodePdfError } from '~shared/types/errors.js';
+import { safeWritePdf } from './safe-write.js';
 
 export type ImageFormat = 'png' | 'jpg' | 'jpeg';
 
@@ -99,9 +100,12 @@ export async function embedImageOnPage(input: EmbedImageInput): Promise<void> {
     throw new NodePdfError('READ_FAILED', 'Failed to serialize PDF', err);
   }
 
-  try {
-    await fs.writeFile(filePath, outBytes);
-  } catch (err) {
-    throw new NodePdfError('READ_FAILED', `Failed to write PDF: ${filePath}`, err);
-  }
+  // Validate the output bytes BEFORE overwriting the source — pdf-lib
+  // has produced silently-broken incremental saves on some real forms.
+  // safeWritePdf throws (without writing) when the output wouldn't
+  // parse, so the original file is left intact for the user to retry.
+  await safeWritePdf(filePath, outBytes, {
+    password,
+    context: 'embedImageOnPage',
+  });
 }

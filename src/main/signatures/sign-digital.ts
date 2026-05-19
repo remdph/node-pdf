@@ -19,6 +19,7 @@ import type { NormRect } from '~shared/types/stamps.js';
 
 import { readCertP12 } from '../certs/storage.js';
 import { parseP12 } from '../certs/crypto.js';
+import { safeWritePdf } from '../pdf/safe-write.js';
 import { fetchOcspResponseRaw } from './ocsp.js';
 import { findSignature } from './storage.js';
 import { requestTimestampToken } from './tsa.js';
@@ -826,18 +827,12 @@ export async function signPdfDigitally(opts: SignDigitalOptions): Promise<void> 
   buf = patchContents(buf, contentsStart, cms);
 
   // ---- 6. Persist ---------------------------------------------------------
-  // We refuse to digitally sign encrypted PDFs in v1: re-encrypting after
-  // signing would shift /Contents + /ByteRange offsets and break the hash.
-  // The proper fix is an incremental-update flow (sign the encrypted bytes
-  // as-is via append-only update) which we haven't built yet. Users should
-  // remove protection, sign, then re-apply protection via the Protect dialog.
-  try {
-    await fs.writeFile(opts.filePath, buf);
-  } catch (err) {
-    throw new NodePdfError(
-      'READ_FAILED',
-      `Failed to write signed PDF: ${opts.filePath}`,
-      err,
-    );
-  }
+  // Validate before overwriting so a botched CMS patch or trailing-trailer
+  // mismatch doesn't destroy the source. safeWritePdf re-parses the
+  // bytes (header + EOF check + pdf-lib round-trip) and throws if
+  // anything looks off — the original file stays intact for retry.
+  await safeWritePdf(opts.filePath, buf, {
+    password: opts.password,
+    context: 'signDigital',
+  });
 }

@@ -14,6 +14,7 @@ import { useStampsStore } from '../stores/stamps.js';
 import { useTabsStore } from '../stores/tabs.js';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
+import type { FormInfo } from '~shared/types/forms.js';
 import type { ProtectInput } from '~shared/types/ipc.js';
 import type {
   ExistingSignatureInfo,
@@ -29,6 +30,19 @@ import { SignaturesMenu } from './SignaturesMenu.js';
 import { StampsMenu } from './StampsMenu.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+
+// NOTE on PDF JavaScript: react-pdf 10.x does NOT forward
+// `enableScripting` to pdf.js's AnnotationLayer (verified in
+// node_modules/react-pdf/dist/Page/AnnotationLayer.js — the
+// `enableScripting` parameter is absent from the renderParameters
+// object passed to `new pdfjs.AnnotationLayer().render(...)`).
+// Without it, PDFs with auto-calculated fields, format validators,
+// or show/hide button actions render as static widgets — the user
+// can fill them but live JS-driven behavior is inert. Fixing this
+// requires either (a) forking react-pdf to expose enableScripting +
+// the sandbox setup, or (b) replacing the annotation layer with a
+// custom one that wires pdf.js's PDFScriptingManager. Both are
+// substantial; deferred for a future phase.
 
 interface PdfViewProps {
   filePath: string;
@@ -201,6 +215,20 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
   const [numPages, setNumPages] = useState(0);
   const [activePage, setActivePage] = useState(1);
   const [reloadKey, setReloadKey] = useState(0);
+  // AcroForm state: populated by an IPC inspection after the document
+  // loads. `null` while we don't know yet; `hasForm:false` for plain PDFs.
+  const [formInfo, setFormInfo] = useState<FormInfo | null>(null);
+  const [formDirty, setFormDirty] = useState(false);
+  const [savingForm, setSavingForm] = useState(false);
+  // Live filled-count override that reflects in-progress edits in
+  // pdf.js's annotationStorage. Falls back to `formInfo.filledCount`
+  // (the disk snapshot) when null, which covers the initial paint
+  // before the first poll lands.
+  const [liveFilledCount, setLiveFilledCount] = useState<number | null>(null);
+  // Cache the annotation-id → fieldName mapping per document load.
+  // Cleared on filePath / reloadKey change so we re-walk pages after
+  // the bytes change.
+  const fieldNameByIdRef = useRef<Map<string, string> | null>(null);
   const [stampMenuAnchor, setStampMenuAnchor] = useState<HTMLElement | null>(null);
   const [signatureMenuAnchor, setSignatureMenuAnchor] = useState<HTMLElement | null>(null);
   // Fase 2: existing /Sig fields found in the current PDF + the side panel.
@@ -214,9 +242,21 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
   // dialog, we close the dialog and arm a placement overlay. The pending
   // signing parameters (cert + reason/etc) are stashed here until the user
   // confirms placement on the page; then applyPlacement reads them and
-  // calls signDigital with the page+rect filled in.
+  // calls signDigital with the page+rect filled in. `lockForm` is bundled
+  // so the user's "Lock form before signing" choice survives the
+  // dialog-close → placement → apply round-trip.
   const [pendingDigitalSign, setPendingDigitalSign] = useState<
-    Omit<SignDigitalInput, 'filePath' | 'pageIndex' | 'rect'> | null
+    | (Omit<SignDigitalInput, 'filePath' | 'pageIndex' | 'rect'> & {
+        lockForm?: boolean;
+      })
+    | null
+  >(null);
+  // Set when the user clicks an existing empty /Sig widget. The next
+  // sign through the dialog skips the drag-placement step and uses
+  // this rect verbatim, since the field already declared where its
+  // signature appearance should live.
+  const [signTargetField, setSignTargetField] = useState<
+    { pageIndex: number; rect: { x: number; y: number; w: number; h: number } } | null
   >(null);
   const [placement, setPlacement] = useState<Placement | null>(null);
   const [applying, setApplying] = useState(false);
@@ -393,6 +433,12 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     // effect below re-populate when the file is ready.
     setExistingSignatures([]);
     setSignaturePanelOpen(false);
+    // Reset AcroForm state — the form effect re-populates on file change
+    // (encryption-gated, same as the signatures effect).
+    setFormInfo(null);
+    setFormDirty(false);
+    setLiveFilledCount(null);
+    fieldNameByIdRef.current = null;
   }, [filePath]);
 
   // Inspect existing /Sig fields for the current document. Triggers on file
@@ -423,6 +469,118 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
       cancelled = true;
     };
   }, [filePath, reloadKey, load.kind, isEncrypted, unlockedPassword]);
+
+  // Inspect AcroForm fields. Same encryption gate as the signatures
+  // effect — wait until we have the password before parsing. Updates
+  // when the bytes change (reloadKey ticks after our writes) so the
+  // "X of Y filled" count reflects the latest save.
+  useEffect(() => {
+    if (load.kind !== 'ready') return;
+    if (isEncrypted && !unlockedPassword) return;
+    let cancelled = false;
+    ipc.pdf
+      .getFormInfo(filePath, unlockedPassword ?? undefined)
+      .then((info) => {
+        if (cancelled) return;
+        setFormInfo(info);
+        setFormDirty(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn('[PdfView] form inspection failed', err);
+        setFormInfo({ hasForm: false, fieldCount: 0, filledCount: 0, fields: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filePath, reloadKey, load.kind, isEncrypted, unlockedPassword]);
+
+  // Poll pdf.js's annotationStorage to drive two pieces of live UI:
+  //   - `formDirty`: flips true the first time any field is changed,
+  //     enabling the Save button.
+  //   - `liveFilledCount`: count of filled fields, recomputed from the
+  //     union of the initial values (formInfo.fields) and the live
+  //     storage map. Without this the status bar pill is frozen at
+  //     the disk snapshot until the user actually saves.
+  // pdf.js doesn't emit change events, so polling at 400ms is the
+  // cheapest reliable approach. We keep polling forever once a form
+  // is detected because the user can both fill AND clear fields.
+  useEffect(() => {
+    if (!formInfo?.hasForm) return;
+    let cancelled = false;
+    const fieldsByName = new Map<string, (typeof formInfo.fields)[number]>();
+    for (const f of formInfo.fields) fieldsByName.set(f.name, f);
+
+    const ensureIdToName = async (
+      pdf: PDFDocumentProxy,
+    ): Promise<Map<string, string>> => {
+      if (fieldNameByIdRef.current) return fieldNameByIdRef.current;
+      const map = new Map<string, string>();
+      for (let i = 1; i <= pdf.numPages; i += 1) {
+        const page = await pdf.getPage(i);
+        const annotations = (await page.getAnnotations()) as Array<{
+          id?: string;
+          fieldName?: string;
+          subtype?: string;
+        }>;
+        for (const ann of annotations) {
+          if (ann.subtype === 'Widget' && ann.id && ann.fieldName) {
+            map.set(String(ann.id), ann.fieldName);
+          }
+        }
+      }
+      fieldNameByIdRef.current = map;
+      return map;
+    };
+
+    const isFilledValue = (v: unknown): boolean => {
+      if (typeof v === 'string') return v.length > 0 && v !== 'Off';
+      if (typeof v === 'boolean') return v;
+      if (Array.isArray(v)) return v.length > 0;
+      return false;
+    };
+
+    const tick = async (): Promise<void> => {
+      const pdf = pdfRef.current;
+      const storage = pdf?.annotationStorage;
+      if (!pdf || !storage || cancelled) return;
+
+      if (storage.size > 0 && !formDirty) setFormDirty(true);
+
+      const idToName = await ensureIdToName(pdf);
+      if (cancelled) return;
+      const serial = storage.serializable;
+      const storedMap = serial.map as Map<string, { value?: unknown }> | null;
+
+      // Build a name → "live value" override from the storage edits.
+      const liveByName = new Map<string, unknown>();
+      if (storedMap) {
+        for (const [id, entry] of storedMap) {
+          const name = idToName.get(String(id));
+          if (name) liveByName.set(name, entry?.value);
+        }
+      }
+
+      let count = 0;
+      for (const field of formInfo.fields) {
+        if (field.type === 'signature') continue;
+        const value = liveByName.has(field.name)
+          ? liveByName.get(field.name)
+          : field.value;
+        if (isFilledValue(value)) count += 1;
+      }
+      if (!cancelled) {
+        setLiveFilledCount((prev) => (prev === count ? prev : count));
+      }
+    };
+
+    void tick();
+    const interval = setInterval(() => void tick(), 400);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [formInfo, formDirty]);
 
   // Auto-open the outline panel the first time we discover a doc has one,
   // but only if the side panel is currently collapsed — never override an
@@ -484,6 +642,48 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
       ratiosRef.current.clear();
       setPageObserver(null);
     };
+  }, [pagesEl]);
+
+  // Delegated click handler on the pages container: when the user
+  // clicks a /Sig form widget, arm the next dialog with that widget's
+  // page + normalized rect so signing skips the manual placement
+  // drag step. pdf.js renders signature widgets as plain divs with
+  // class `signatureWidgetAnnotation`; we read their on-page
+  // position from the DOM since we don't get an event from pdf.js
+  // for clicks on inert widgets.
+  useEffect(() => {
+    const root = pagesEl;
+    if (!root) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const widget = target.closest<HTMLElement>('.signatureWidgetAnnotation');
+      if (!widget) return;
+      const pageWrap = widget.closest<HTMLElement>('.pdf-page-wrap');
+      if (!pageWrap) return;
+      const pageIndexAttr = pageWrap.dataset.pageIndex;
+      const pageIndex = pageIndexAttr != null ? Number(pageIndexAttr) : NaN;
+      if (!Number.isInteger(pageIndex) || pageIndex < 0) return;
+      // Use the .pdf-page (canvas wrapper) as the reference frame —
+      // its bounding box matches the rendered page exactly, vs the
+      // .pdf-page-wrap which may include extra padding.
+      const pageBoxEl = pageWrap.querySelector<HTMLElement>('.pdf-page') ?? pageWrap;
+      const widgetBox = widget.getBoundingClientRect();
+      const pageBox = pageBoxEl.getBoundingClientRect();
+      if (pageBox.width === 0 || pageBox.height === 0) return;
+      const rect = {
+        x: (widgetBox.left - pageBox.left) / pageBox.width,
+        y: (widgetBox.top - pageBox.top) / pageBox.height,
+        w: widgetBox.width / pageBox.width,
+        h: widgetBox.height / pageBox.height,
+      };
+      e.preventDefault();
+      e.stopPropagation();
+      setSignTargetField({ pageIndex, rect });
+      setDigitalSignOpen(true);
+    };
+    root.addEventListener('click', onClick);
+    return () => root.removeEventListener('click', onClick);
   }, [pagesEl]);
 
   const file = useMemo(
@@ -962,6 +1162,231 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     [filePath, reloadKey],
   );
 
+  // Walk pdf.js's per-page annotation lists and build a
+  //   pdfjs annotation-id  →  { fieldName, buttonValue?, options? }
+  // map. Form save needs more than just the field name:
+  //   - Radio buttons: pdf.js stores `{ value: true/false }` per widget,
+  //     so we need the widget's `buttonValue` (the /Opt entry the radio
+  //     fires when selected) to translate true → the export value
+  //     pdf-lib's `field.select(...)` expects.
+  //   - Listbox / dropdown: pdf.js stores the export value (the
+  //     `<option value>` attribute), but pdf-lib's
+  //     `PDFOptionList.select` / `PDFDropdown.select` validate
+  //     against the DISPLAY values returned by `getOptions()`. For
+  //     PDFs whose /Opt entries are `[exportValue, displayValue]`
+  //     pairs (common in govt / Apryse sample forms) those two
+  //     differ and pdf-lib throws "InvalidFieldValueError" — which
+  //     surfaces as a silent skip and the selection is lost. Carry
+  //     pdf.js's per-widget `options` map so the harvest step below
+  //     can translate export → display before sending.
+  type WidgetMeta = {
+    fieldName: string;
+    buttonValue?: string;
+    options?: Array<{ exportValue?: string; displayValue?: string }>;
+  };
+  const buildWidgetMeta = useCallback(async (): Promise<Map<string, WidgetMeta>> => {
+    const pdf = pdfRef.current;
+    if (!pdf) return new Map();
+    const map = new Map<string, WidgetMeta>();
+    for (let i = 1; i <= pdf.numPages; i += 1) {
+      const page = await pdf.getPage(i);
+      const annotations = (await page.getAnnotations()) as Array<{
+        id?: string;
+        fieldName?: string;
+        subtype?: string;
+        buttonValue?: string;
+        options?: Array<{ exportValue?: string; displayValue?: string }>;
+      }>;
+      for (const ann of annotations) {
+        if (ann.subtype === 'Widget' && ann.id && ann.fieldName) {
+          map.set(String(ann.id), {
+            fieldName: ann.fieldName,
+            buttonValue: ann.buttonValue,
+            options: ann.options,
+          });
+        }
+      }
+    }
+    return map;
+  }, []);
+
+  // Read every pending edit out of annotationStorage and translate it
+  // into the `{ fieldName: value }` shape pdf-lib expects. Dispatches
+  // by field type from `formInfo` so each kind gets the right
+  // marshaling — without this, radios save as the literal `true`
+  // (pdf.js's per-widget value) instead of the export string
+  // pdf-lib needs to call `radioGroup.select(value)`.
+  // Returns null when there's nothing to ship so callers early-exit.
+  const harvestFormValues = useCallback(async (): Promise<
+    Record<string, string | boolean | string[]> | null
+  > => {
+    const pdf = pdfRef.current;
+    if (!pdf || !formInfo?.hasForm) return null;
+    const serial = pdf.annotationStorage.serializable;
+    const storedMap = serial.map as Map<string, { value?: unknown }> | null;
+    if (!storedMap || storedMap.size === 0) return null;
+
+    const meta = await buildWidgetMeta();
+
+    // Group raw storage entries by fieldName. Radios have multiple
+    // widgets per group (one per option), so collecting per-name lets
+    // us pick the selected one below.
+    type RawEntry = { id: string; value: unknown };
+    const entriesByField = new Map<string, RawEntry[]>();
+    for (const [id, entry] of storedMap) {
+      const widget = meta.get(String(id));
+      if (!widget) continue;
+      const list = entriesByField.get(widget.fieldName) ?? [];
+      list.push({ id: String(id), value: entry?.value });
+      entriesByField.set(widget.fieldName, list);
+    }
+
+    const fieldByName = new Map(formInfo.fields.map((f) => [f.name, f]));
+    const values: Record<string, string | boolean | string[]> = {};
+
+    // Build an exportValue → displayValue map for any choice widget
+    // in the entries. pdf-lib's `PDFOptionList.select` / `PDFDropdown
+    // .select` only accept display values; pdf.js stores export
+    // values. Without translating we'd lose every selection on PDFs
+    // whose /Opt entries are `[exportValue, displayValue]` pairs.
+    const toDisplay = (
+      exportVal: string,
+      options?: Array<{ exportValue?: string; displayValue?: string }>,
+    ): string => {
+      if (!options || options.length === 0) return exportVal;
+      for (const opt of options) {
+        if (opt.exportValue === exportVal) {
+          return opt.displayValue ?? exportVal;
+        }
+      }
+      return exportVal;
+    };
+
+    for (const [fieldName, entries] of entriesByField) {
+      const fieldInfo = fieldByName.get(fieldName);
+      const fieldType = fieldInfo?.type ?? 'unknown';
+
+      if (fieldType === 'radio') {
+        // pdf.js sets `{ value: true }` on the selected radio's widget
+        // and `{ value: false }` (or omits) for the others. Find the
+        // true one, look up its buttonValue, send that to pdf-lib.
+        const selected = entries.find((e) => e.value === true);
+        if (selected) {
+          const widget = meta.get(selected.id);
+          const exportValue = widget?.buttonValue;
+          if (exportValue) values[fieldName] = exportValue;
+        }
+        continue;
+      }
+
+      if (fieldType === 'listbox') {
+        const last = entries[entries.length - 1];
+        const raw = last?.value;
+        // Widget options come from any of the entries — they're all
+        // copies of the same field's /Opt.
+        const widgetOptions = last ? meta.get(last.id)?.options : undefined;
+        if (Array.isArray(raw)) {
+          values[fieldName] = raw.map((v) => toDisplay(String(v), widgetOptions));
+        } else if (typeof raw === 'string' && raw.length > 0) {
+          values[fieldName] = [toDisplay(raw, widgetOptions)];
+        }
+        continue;
+      }
+
+      if (fieldType === 'checkbox') {
+        const last = entries[entries.length - 1];
+        const raw = last?.value;
+        if (typeof raw === 'boolean') values[fieldName] = raw;
+        else if (typeof raw === 'string') values[fieldName] = raw.length > 0 && raw !== 'Off';
+        continue;
+      }
+
+      if (fieldType === 'dropdown') {
+        const last = entries[entries.length - 1];
+        const raw = last?.value;
+        const widgetOptions = last ? meta.get(last.id)?.options : undefined;
+        if (typeof raw === 'string') {
+          values[fieldName] = toDisplay(raw, widgetOptions);
+        } else if (Array.isArray(raw) && raw.length > 0) {
+          values[fieldName] = toDisplay(String(raw[0]), widgetOptions);
+        }
+        continue;
+      }
+
+      // text, unknown: take the latest entry as a primitive.
+      const last = entries[entries.length - 1];
+      const raw = last?.value;
+      if (typeof raw === 'string' || typeof raw === 'boolean') {
+        values[fieldName] = raw;
+      } else if (Array.isArray(raw)) {
+        if (raw.length > 0) values[fieldName] = String(raw[0]);
+      } else if (raw != null) {
+        values[fieldName] = String(raw);
+      }
+    }
+
+    return Object.keys(values).length > 0 ? values : null;
+  }, [buildWidgetMeta, formInfo]);
+
+  // Persist pending form edits when the user clicks the toolbar
+  // Save button. Triggers a reload so the post-save snapshot
+  // becomes the new annotationStorage baseline.
+  const handleSaveForm = useCallback(async () => {
+    if (!formInfo?.hasForm) return;
+    setSavingForm(true);
+    try {
+      const values = await harvestFormValues();
+      if (!values) return;
+      const result = await ipc.pdf.fillForm({
+        filePath,
+        values,
+        mode: 'keep',
+        password: unlockedPassword ?? undefined,
+      });
+      if (result.skipped.length > 0) {
+        console.warn('[PdfView] fillForm skipped fields', result.skipped);
+      }
+      snapshotCacheRef.current?.clear();
+      restorePageRef.current = activePage;
+      setRestoring(true);
+      setFormDirty(false);
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      console.error('[PdfView] fillForm failed', err);
+    } finally {
+      setSavingForm(false);
+    }
+  }, [activePage, filePath, formInfo, harvestFormValues, unlockedPassword]);
+
+  // Silently persist pending form edits before any mutation that
+  // would otherwise read a stale on-disk version (stamps, visual
+  // signatures, cert signatures). The mutation's own reload will
+  // pick up the saved values on the next pass, so we deliberately
+  // do NOT tick reloadKey here. Pass `mode: 'flatten'` to lock the
+  // form before a cert signature ("Lock form fields" checkbox).
+  const saveFormIfDirty = useCallback(
+    async (mode: 'keep' | 'flatten' = 'keep'): Promise<void> => {
+      if (!formDirty) return;
+      const values = await harvestFormValues();
+      if (!values) return;
+      try {
+        await ipc.pdf.fillForm({
+          filePath,
+          values,
+          mode,
+          password: unlockedPassword ?? undefined,
+        });
+        setFormDirty(false);
+      } catch (err) {
+        // Don't block the caller's mutation — they may still want to
+        // proceed (e.g. user explicitly chose to sign anyway). Log so
+        // the failure isn't invisible.
+        console.error('[PdfView] auto-save form failed', err);
+      }
+    },
+    [filePath, formDirty, harvestFormValues, unlockedPassword],
+  );
+
   const handleProtect = useCallback(
     async (payload: Omit<ProtectInput, 'filePath'>) => {
       setProtecting(true);
@@ -1015,25 +1440,71 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
   }, [selectStamp, selectSignature]);
 
   const handleDigitalSign = useCallback(
-    async (input: Omit<SignDigitalInput, 'filePath' | 'pageIndex' | 'rect'>) => {
+    async (
+      input: Omit<SignDigitalInput, 'filePath' | 'pageIndex' | 'rect'> & {
+        // UI-only flag from the dialog: "Lock form fields before signing".
+        // Drives the auto-save mode (flatten vs keep); never reaches the
+        // signDigital IPC.
+        lockForm?: boolean;
+      },
+    ) => {
+      const { lockForm, ...signInput } = input;
+      const formMode: 'keep' | 'flatten' = lockForm ? 'flatten' : 'keep';
+
+      // Fast-path: the dialog was opened by clicking an existing /Sig
+      // widget. The widget's own rect IS the placement, so skip the
+      // drag-overlay step and sign immediately whether visual or not.
+      if (signTargetField) {
+        setDigitalSigning(true);
+        try {
+          // Flush pending form edits first so the sign IPC reads the
+          // user's typing, not the stale on-disk values.
+          await saveFormIfDirty(formMode);
+          const result = await ipc.signatures.signDigital({
+            filePath,
+            ...signInput,
+            pageIndex: signTargetField.pageIndex,
+            rect: signTargetField.rect,
+            ...(unlockedPassword ? { password: unlockedPassword } : {}),
+          });
+          if (result.applied) {
+            restorePageRef.current = activePage;
+            setRestoring(true);
+            snapshotCacheRef.current?.clear();
+            setReloadKey((k) => k + 1);
+            setDigitalSignOpen(false);
+            setSignTargetField(null);
+          }
+        } finally {
+          setDigitalSigning(false);
+        }
+        return;
+      }
+
       // Branch on visible vs invisible. For visible signatures we don't sign
       // here — we stash the params, close the dialog, and select the visual
       // signature so the placement overlay activates. applyPlacement reads
       // pendingDigitalSign and routes to signDigital with the page+rect.
-      if (input.visualSignatureId) {
-        setPendingDigitalSign(input);
+      // For visible sigs the form is auto-saved inside applyPlacement so it
+      // happens immediately before the actual write — same window as here.
+      if (signInput.visualSignatureId) {
+        // Re-attach the UI-only lockForm flag so applyPlacement can
+        // honor the user's "Lock form fields" choice when it does its
+        // own saveFormIfDirty call.
+        setPendingDigitalSign({ ...signInput, ...(lockForm ? { lockForm: true } : {}) });
         setDigitalSignOpen(false);
         // Activating the visual signature shows the existing placement
         // overlay UI — we get drag/resize + the action bar for free.
-        selectSignature(input.visualSignatureId);
+        selectSignature(signInput.visualSignatureId);
         return;
       }
 
       setDigitalSigning(true);
       try {
+        await saveFormIfDirty(formMode);
         const result = await ipc.signatures.signDigital({
           filePath,
-          ...input,
+          ...signInput,
           // Pass the unlocked password through for encrypted PDFs — the
           // backend uses incremental update, so the original encrypted
           // content stays intact; we just need the password to read the
@@ -1054,7 +1525,14 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
         setDigitalSigning(false);
       }
     },
-    [filePath, activePage, selectSignature, unlockedPassword],
+    [
+      activePage,
+      filePath,
+      saveFormIfDirty,
+      selectSignature,
+      signTargetField,
+      unlockedPassword,
+    ],
   );
 
   const applyPlacement = useCallback(async () => {
@@ -1089,6 +1567,16 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     setApplying(true);
     setPlacementError(null);
     try {
+      // Flush pending form edits to disk BEFORE the mutation reads
+      // the file. Without this, in-memory pdf.js form state is lost
+      // when the renderer reloads after the stamp / signature is
+      // applied. For cert-signs the user can opt into 'flatten' via
+      // the dialog's "Lock form fields" checkbox; everything else
+      // keeps the form editable.
+      const formMode: 'keep' | 'flatten' =
+        pendingDigitalSign?.lockForm ? 'flatten' : 'keep';
+      await saveFormIfDirty(formMode);
+
       // Routing rules (mutually exclusive):
       //   1. Pending digital sign + visual selected → signDigital with the
       //      visualSignatureId + page + rect. Cryptographic + visible mark
@@ -1097,9 +1585,12 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
       //   3. Only visual signature selected → signatures.apply (Fase 1).
       let applied = false;
       if (pendingDigitalSign && selectedSignatureId) {
+        // Strip the UI-only lockForm flag before forwarding to the
+        // IPC — the signDigital handler doesn't know about it.
+        const { lockForm: _lockForm, ...sigInput } = pendingDigitalSign;
         applied = (
           await ipc.signatures.signDigital({
-            ...pendingDigitalSign,
+            ...sigInput,
             filePath,
             pageIndex: placement.pageIndex,
             rect: normRect,
@@ -1149,6 +1640,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     filePath,
     pendingDigitalSign,
     placement,
+    saveFormIfDirty,
     selectSignature,
     selectStamp,
     selectedSignatureId,
@@ -1308,6 +1800,25 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
           >
             <FitWidthIcon />
           </button>
+          {formInfo?.hasForm && ((liveFilledCount ?? formInfo.filledCount) > 0 || formDirty) && (
+            <button
+              type="button"
+              className={`pdf-tool${formDirty ? ' pdf-tool-active' : ''}`}
+              onClick={() => void handleSaveForm()}
+              aria-label="Save form"
+              title={
+                formDirty
+                  ? 'Save filled form values'
+                  : 'No form changes to save'
+              }
+              disabled={!isReady || savingForm || !formDirty}
+            >
+              {/* Swap form glyph → floppy disk once there are unsaved
+               * edits so the toolbar reads as an actionable "Save"
+               * button rather than the neutral form indicator. */}
+              {formDirty ? <SaveIcon /> : <FormIcon />}
+            </button>
+          )}
         </div>
 
         <div className="pdf-toolbar-group pdf-toolbar-right">
@@ -1653,6 +2164,17 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
             </span>
           </>
         )}
+        {formInfo?.hasForm && (liveFilledCount ?? formInfo.filledCount) > 0 && (
+          <>
+            <span className="pdf-status-sep" aria-hidden />
+            <span
+              className="pdf-status-item status-form"
+              title="AcroForm fields filled in this document"
+            >
+              Form · {liveFilledCount ?? formInfo.filledCount} filled
+            </span>
+          </>
+        )}
         <span className="pdf-status-spacer" aria-hidden />
         <span className="pdf-status-item" title="Zoom level">
           {Math.round(zoom * 100)}%
@@ -1668,16 +2190,6 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
           signatures={existingSignatures}
           loading={signaturesLoading}
           onClose={() => setSignaturePanelOpen(false)}
-        />
-      )}
-
-      {digitalSignOpen && (
-        <DigitalSignDialog
-          filePath={filePath}
-          isEncrypted={isEncrypted}
-          busy={digitalSigning}
-          onClose={() => setDigitalSignOpen(false)}
-          onSign={handleDigitalSign}
         />
       )}
 
@@ -1702,8 +2214,15 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
           filePath={filePath}
           isEncrypted={isEncrypted}
           busy={digitalSigning}
+          hasDirtyForm={formDirty}
           onClose={() => {
-            if (!digitalSigning) setDigitalSignOpen(false);
+            if (digitalSigning) return;
+            setDigitalSignOpen(false);
+            // Drop any pre-armed /Sig widget target so the next time
+            // the dialog is opened "normally" (via toolbar) it goes
+            // through the drag-placement flow instead of trying to
+            // reuse a stale rect.
+            setSignTargetField(null);
           }}
           onSign={handleDigitalSign}
         />
@@ -1903,6 +2422,7 @@ function PageItem({
         width={width}
         className="pdf-page"
         renderAnnotationLayer
+        renderForms
         renderTextLayer
         onRenderSuccess={handleRenderSuccess}
         onRenderTextLayerSuccess={onTextLayerRendered}
@@ -2252,6 +2772,54 @@ function SignatureIcon(): JSX.Element {
 /** Rubber stamp silhouette — square pad, neck, and round handle on top,
  * plus the implied surface underline. Reads as "rubber stamp" at toolbar
  * size where finer detail would muddle. */
+function FormIcon(): JSX.Element {
+  // Document with two filled lines + a checkbox in the corner — reads
+  // as "fillable form" at the 18×18 toolbar size without being noisy.
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <path
+        d="M3.5 2.5h8L14.5 5.5v10a0.5 0.5 0 0 1 -0.5 0.5H3.5a0.5 0.5 0 0 1 -0.5 -0.5V3a0.5 0.5 0 0 1 0.5 -0.5z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path d="M11.5 2.5V5.5H14.5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M5.5 9h7 M5.5 11.5h7 M5.5 14h4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SaveIcon(): JSX.Element {
+  // Classic floppy disk: outer rounded square + notched top label
+  // strip + inset bottom panel. Universally read as "save".
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <path
+        d="M3.5 3h8.5L15 5.5V14a1 1 0 0 1 -1 1H4a1 1 0 0 1 -1 -1V4a1 1 0 0 1 0.5 -1z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      {/* Top label / metal slide */}
+      <path
+        d="M5.5 3v3.5h6V3"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      {/* Bottom write panel */}
+      <rect
+        x="5"
+        y="9"
+        width="8"
+        height="6"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+    </svg>
+  );
+}
+
 function StampIcon(): JSX.Element {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>

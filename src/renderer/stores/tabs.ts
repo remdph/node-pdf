@@ -170,6 +170,28 @@ export const useTabsStore = create<TabsState>()(
         recents: state.recents,
         starred: state.starred,
       }),
+      // Defensive normalization on rehydrate: if tabs is empty, force
+      // activeId/view back to "home". Without this guard, stale state
+      // (an activeId left over from a tab that was removed in a
+      // previous session, or a `view: 'tab'` set when the last tab was
+      // still open) can convince App.tsx that there's a tab to show
+      // even when there isn't, leaving the user staring at a blank
+      // surface or — worse — at a "ghost" of the last PDF that we
+      // can't actually re-render because the tab object is gone.
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        if (!Array.isArray(state.tabs) || state.tabs.length === 0) {
+          state.tabs = [];
+          state.activeId = null;
+          state.view = 'picker';
+        } else if (!state.tabs.some((t) => t.id === state.activeId)) {
+          // activeId references a tab that no longer exists — promote
+          // the first surviving tab so the user doesn't land on a
+          // hidden one.
+          state.activeId = state.tabs[0]?.id ?? null;
+          if (state.activeId === null) state.view = 'picker';
+        }
+      },
       version: 6,
       migrate: (persisted, version) => {
         if (!persisted || typeof persisted !== 'object') return persisted;

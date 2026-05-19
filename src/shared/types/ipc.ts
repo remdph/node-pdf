@@ -3,6 +3,7 @@ import type {
   GenerateCertInput,
   ImportCertInput,
 } from './certs.js';
+import type { FillFormInput, FillFormResult, FormInfo } from './forms.js';
 import type { AppSettings } from './settings.js';
 import type {
   ApplySignatureInput,
@@ -159,6 +160,14 @@ export interface IpcApi {
      *    encryption is removed.
      */
     protect(input: ProtectInput): Promise<void>;
+    /** Inspect AcroForm fields. Returns hasForm=false with empty
+     * fields for non-form PDFs (cheap — only parses the catalog). */
+    getFormInfo(filePath: string, password?: string): Promise<FormInfo>;
+    /** Write the supplied field values back to the file. Incremental
+     * by default (keeps fields editable + preserves any existing
+     * signatures); `mode: 'flatten'` bakes the values into page
+     * graphics and strips the form. */
+    fillForm(input: FillFormInput): Promise<FillFormResult>;
   };
   printer: {
     list(): Promise<PrinterInfo[]>;
@@ -233,6 +242,8 @@ export const IPC_CHANNELS = {
     flushPending: 'pdf:flush-pending',
     openExternal: 'pdf:open-external',
     applyStamp: 'pdf:apply-stamp',
+    getFormInfo: 'pdf:get-form-info',
+    fillForm: 'pdf:fill-form',
     print: 'pdf:print',
     protect: 'pdf:protect',
   },

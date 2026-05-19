@@ -5,6 +5,11 @@ import path from 'node:path';
 import { PDFDocument } from '@cantoo/pdf-lib';
 
 import { NodePdfError } from '~shared/types/errors.js';
+import type {
+  FillFormInput,
+  FillFormResult,
+  FormInfo,
+} from '~shared/types/forms.js';
 import { IPC_CHANNELS } from '~shared/types/ipc.js';
 import type {
   PrinterInfo,
@@ -14,6 +19,7 @@ import type {
 import type { ApplyStampInput, ApplyStampResult } from '~shared/types/stamps.js';
 import { embedImageOnPage } from '../pdf/embed.js';
 import { toPdfLibPermissions, type PdfDocumentLike } from '../pdf/encryption.js';
+import { fillForm, inspectForm } from '../pdf/form.js';
 import { findStamp } from '../stamps/storage.js';
 import { handle } from './register.js';
 
@@ -284,6 +290,26 @@ export function registerPdfIpc(): void {
           err,
         );
       }
+    },
+  );
+
+  handle<[string, string | undefined], FormInfo>(
+    IPC_CHANNELS.pdf.getFormInfo,
+    async (_event, filePath, password) => {
+      if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) {
+        throw new NodePdfError('INVALID_PATH', 'Invalid PDF path');
+      }
+      return inspectForm(filePath, password);
+    },
+  );
+
+  handle<[FillFormInput], FillFormResult>(
+    IPC_CHANNELS.pdf.fillForm,
+    async (_event, input) => {
+      if (!input || typeof input.filePath !== 'string' || !path.isAbsolute(input.filePath)) {
+        throw new NodePdfError('INVALID_PATH', 'Invalid PDF path');
+      }
+      return fillForm(input);
     },
   );
 

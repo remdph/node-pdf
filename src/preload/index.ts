@@ -10,6 +10,11 @@ import type {
   UpdaterState,
 } from '~shared/types/ipc.js';
 import type {
+  FillFormInput,
+  FillFormResult,
+  FormInfo,
+} from '~shared/types/forms.js';
+import type {
   Certificate,
   GenerateCertInput,
   ImportCertInput,
@@ -72,6 +77,10 @@ const api = {
       invoke<void>(IPC_CHANNELS.pdf.print, filePath, options),
     protect: (input: ProtectInput) =>
       invoke<void>(IPC_CHANNELS.pdf.protect, input),
+    getFormInfo: (filePath: string, password?: string) =>
+      invoke<FormInfo>(IPC_CHANNELS.pdf.getFormInfo, filePath, password),
+    fillForm: (input: FillFormInput) =>
+      invoke<FillFormResult>(IPC_CHANNELS.pdf.fillForm, input),
   },
   printer: {
     list: () => invoke<PrinterInfo[]>(IPC_CHANNELS.printer.list),

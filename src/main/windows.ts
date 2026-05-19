@@ -70,6 +70,28 @@ export function createMainWindow(): BrowserWindow {
     return { action: 'deny' };
   });
 
+  // `setWindowOpenHandler` above only catches popups (target="_blank"
+  // or window.open). PDF link annotations are rendered by pdf.js as
+  // plain `<a href>` without target, so a click navigates the entire
+  // webContents — turning the app into a web browser. Intercept any
+  // cross-origin navigation and hand it off to the OS browser via
+  // `shell.openExternal`. Same-origin nav (in-PDF hash links, dev-
+  // server reloads, etc.) passes through unmodified.
+  win.webContents.on('will-navigate', (event, url) => {
+    let isSameOrigin = false;
+    try {
+      const currentUrl = win.webContents.getURL();
+      if (currentUrl) {
+        isSameOrigin = new URL(url).origin === new URL(currentUrl).origin;
+      }
+    } catch {
+      // Bad URL — fall through and treat as external.
+    }
+    if (isSameOrigin) return;
+    event.preventDefault();
+    void shell.openExternal(url);
+  });
+
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     const devUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL;
     // electron-forge launches Electron concurrently with the Vite dev server,

@@ -21,10 +21,22 @@ interface DigitalSignDialogProps {
    *    caller closes the dialog and arms a page-placement overlay; the
    *    actual signing happens once the user confirms placement.
    * The parent decides what to do based on whether visualSignatureId is
-   * present in `input`. */
-  onSign(input: Omit<SignDigitalInput, 'filePath' | 'pageIndex' | 'rect'>): Promise<void>;
+   * present in `input`. `lockForm` is a UI-only flag that asks the
+   * caller to flatten the form (mode: 'flatten') before signing — only
+   * meaningful when the PDF has pending form edits. */
+  onSign(
+    input: Omit<SignDigitalInput, 'filePath' | 'pageIndex' | 'rect'> & {
+      lockForm?: boolean;
+    },
+  ): Promise<void>;
   /** Set while the sign IPC is in flight. */
   busy: boolean;
+  /** When true the parent has pending form edits that will be flushed
+   * to disk before the signature is applied. The dialog uses this to
+   * surface a "Lock form fields" option so the user can choose
+   * flatten (form locked, signature stays valid forever) vs keep
+   * (form editable, future fills will void the sig in strict viewers). */
+  hasDirtyForm?: boolean;
 }
 
 export function DigitalSignDialog({
@@ -33,6 +45,7 @@ export function DigitalSignDialog({
   onClose,
   onSign,
   busy,
+  hasDirtyForm = false,
 }: DigitalSignDialogProps): JSX.Element {
   const certs = useCertsStore((s) => s.certs);
   const loaded = useCertsStore((s) => s.loaded);
@@ -67,6 +80,12 @@ export function DigitalSignDialog({
   // the sig OFFLINE for years. Off by default since it requires network
   // (and slows signing by the OCSP round-trip).
   const [embedRevocation, setEmbedRevocation] = useState(false);
+  // When `hasDirtyForm` is set the parent will flush pending form edits
+  // before signing. `lockForm` asks for a flatten-save instead of the
+  // default keep-save: the form becomes uneditable but the signature
+  // can never be invalidated by a later fill. Off by default — most
+  // users want to keep their form editable.
+  const [lockForm, setLockForm] = useState(false);
 
   useEffect(() => {
     if (!loaded) void load();
@@ -145,6 +164,7 @@ export function DigitalSignDialog({
         ...(visibleMode && visualSignatureId ? { visualSignatureId } : {}),
         ...(useTimestamp && tsaUrlInput.trim() ? { tsaUrl: tsaUrlInput.trim() } : {}),
         ...(embedRevocation ? { embedRevocationInfo: true } : {}),
+        ...(hasDirtyForm && lockForm ? { lockForm: true } : {}),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -402,6 +422,34 @@ export function DigitalSignDialog({
                 </div>
               )}
             </div>
+
+            {hasDirtyForm && (
+              <div className="cert-field">
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    cursor: busy ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={lockForm}
+                    onChange={(e) => setLockForm(e.target.checked)}
+                    disabled={busy}
+                  />
+                  <span style={{ fontSize: '0.85rem', color: 'var(--fg)' }}>
+                    Lock form fields before signing
+                  </span>
+                </label>
+                <div className="signature-editor-hint" style={{ marginTop: '0.3rem' }}>
+                  {lockForm
+                    ? 'Form values will be flattened into the page graphics before the signature is applied. The form becomes uneditable, but the signature can never be invalidated by a later fill.'
+                    : 'Form stays editable. The signature will cover the current form values; any later fill creates an incremental change that strict verifiers may flag as "modified after signing".'}
+                </div>
+              </div>
+            )}
 
             {error && (
               <div className="signature-editor-hint" style={{ color: 'var(--danger)' }}>
