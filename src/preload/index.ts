@@ -57,6 +57,7 @@ const api = {
     onUpdaterStateChange: (handler: (state: UpdaterState) => void) =>
       subscribe<UpdaterState>(IPC_CHANNELS.app.updaterStateChange, handler),
     installUpdate: () => invoke<void>(IPC_CHANNELS.app.updaterInstall),
+    checkForUpdates: () => invoke<void>(IPC_CHANNELS.app.updaterCheckNow),
   },
   pdf: {
     open: (defaultPath?: string) =>

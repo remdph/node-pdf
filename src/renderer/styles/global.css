@@ -1724,6 +1724,48 @@ button.primary:hover {
   font-weight: 500;
 }
 
+/* Plain action button for rows like "Check for updates now". */
+.settings-action-btn {
+  flex-shrink: 0;
+  padding: 0.4rem 0.85rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.settings-action-btn:hover:not(:disabled) {
+  background: rgba(106, 163, 255, 0.14);
+  border-color: #6aa3ff;
+}
+
+.settings-action-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Inline status notes appended to a row's sub-text after an action. */
+.settings-row-error {
+  display: block;
+  margin-top: 4px;
+  color: var(--danger);
+  word-break: break-word;
+}
+
+.settings-row-ok {
+  display: block;
+  margin-top: 4px;
+  color: #6aa3ff;
+}
+
 /* --- Protect dialog (extends password-dialog with permissions) -------- */
 .protect-dialog {
   width: 440px;

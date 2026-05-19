@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/remdph/node-pdf/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.3.2-cbd5e1?style=flat-square" /></a>
+  <a href="https://github.com/remdph/node-pdf/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.3.3-cbd5e1?style=flat-square" /></a>
   <img alt="License" src="https://img.shields.io/badge/license-MIT-cbd5e1?style=flat-square" />
   <img alt="Platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-cbd5e1?style=flat-square" />
 </p>

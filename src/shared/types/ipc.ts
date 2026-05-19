@@ -133,6 +133,10 @@ export interface IpcApi {
      * Squirrel update. No-op when status !== 'ready' or when running
      * on Linux. */
     installUpdate(): Promise<void>;
+    /** Manual / forced check. Works regardless of the
+     * `checkUpdatesOnStartup` setting — that flag only gates the
+     * automatic polling, not on-demand checks. */
+    checkForUpdates(): Promise<void>;
   };
   pdf: {
     /** Show the system "Open PDF" dialog. Pass `defaultPath` to root the
@@ -221,6 +225,7 @@ export const IPC_CHANNELS = {
     updaterStateGet: 'app:updater-state-get',
     updaterStateChange: 'app:updater-state-change',
     updaterInstall: 'app:updater-install',
+    updaterCheckNow: 'app:updater-check-now',
   },
   pdf: {
     open: 'pdf:open',

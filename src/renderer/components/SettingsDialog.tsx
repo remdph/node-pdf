@@ -1,7 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
+import { ipc } from '../lib/ipc.js';
 import { applyTheme } from '../lib/theme.js';
 import { useSettingsStore } from '../stores/settings.js';
+import type { UpdaterState } from '~shared/types/ipc.js';
 import type { UiTheme } from '~shared/types/settings.js';
 
 interface SettingsDialogProps {
@@ -26,6 +28,7 @@ interface SettingsDialogProps {
 export function SettingsDialog({ onClose }: SettingsDialogProps): JSX.Element {
   const settings = useSettingsStore((s) => s.settings);
   const update = useSettingsStore((s) => s.update);
+  const [updater, setUpdater] = useState<UpdaterState | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -34,6 +37,15 @@ export function SettingsDialog({ onClose }: SettingsDialogProps): JSX.Element {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  // Subscribe to updater state so the "Check now" button can show
+  // checking/error feedback right next to itself.
+  useEffect(() => {
+    void ipc.app.updaterState().then(setUpdater);
+    return ipc.app.onUpdaterStateChange(setUpdater);
+  }, []);
+
+  const checkingNow = updater?.status === 'checking';
 
   const setTheme = (theme: UiTheme) => {
     // Apply immediately so the user sees the change while the IPC
@@ -102,6 +114,42 @@ export function SettingsDialog({ onClose }: SettingsDialogProps): JSX.Element {
                 <span className="settings-toggle-thumb" />
               </span>
             </label>
+          </section>
+
+          <section className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Check for updates now</div>
+              <div className="settings-row-sub">
+                Force an immediate check. Works whether or not the toggle
+                above is on.{' '}
+                {updater?.status === 'error' && updater.error && (
+                  <span className="settings-row-error">Last error: {updater.error}</span>
+                )}
+                {updater?.status === 'current' && updater.latestVersion && (
+                  <span className="settings-row-ok">
+                    Up to date · latest is v{updater.latestVersion}.
+                  </span>
+                )}
+                {updater?.status === 'available' && updater.latestVersion && (
+                  <span className="settings-row-ok">
+                    v{updater.latestVersion} is available.
+                  </span>
+                )}
+                {updater?.status === 'ready' && updater.latestVersion && (
+                  <span className="settings-row-ok">
+                    v{updater.latestVersion} is downloaded and ready to install.
+                  </span>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="settings-action-btn"
+              onClick={() => void ipc.app.checkForUpdates()}
+              disabled={checkingNow}
+            >
+              {checkingNow ? 'Checking…' : 'Check now'}
+            </button>
           </section>
 
           <section className="settings-row">

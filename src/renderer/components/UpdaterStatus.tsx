@@ -61,8 +61,12 @@ export function UpdaterStatus(): JSX.Element | null {
   }
 
   if (status === 'error') {
+    // Show the underlying autoUpdater / fetch error in a native tooltip
+    // so the user can read it without opening Settings — surfaces
+    // useful hints on Win/Mac like "Code signing identity does not
+    // match" or "Could not load update".
     return (
-      <div className="updater-status" role="status">
+      <div className="updater-status" role="status" title={state.error ?? undefined}>
         <span className="updater-status-text">Update check failed · v{currentVersion}</span>
       </div>
     );
