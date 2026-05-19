@@ -5,6 +5,8 @@ import { PdfView } from './components/PdfView.js';
 import { TitleBar } from './components/TitleBar.js';
 import { UpdateBanner } from './components/UpdateBanner.js';
 import { ipc } from './lib/ipc.js';
+import { applyTheme } from './lib/theme.js';
+import { useSettingsStore } from './stores/settings.js';
 import { useTabsStore } from './stores/tabs.js';
 
 export function App(): JSX.Element {
@@ -12,6 +14,19 @@ export function App(): JSX.Element {
   const activeId = useTabsStore((s) => s.activeId);
   const view = useTabsStore((s) => s.view);
   const openPdf = useTabsStore((s) => s.openPdf);
+  const loadSettings = useSettingsStore((s) => s.load);
+  const theme = useSettingsStore((s) => s.settings.theme);
+
+  // Pull the persisted settings on mount. main.tsx already applied the
+  // cached theme synchronously to avoid a flash, but settings.json is
+  // the source of truth — reconcile here once it lands.
+  useEffect(() => {
+    void loadSettings();
+  }, [loadSettings]);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   // Open paths handed to us by the OS shell ("Open with NodePDF" / file
   // double-click). Two channels:

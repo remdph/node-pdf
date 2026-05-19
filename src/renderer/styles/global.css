@@ -19,6 +19,93 @@
   color-scheme: dark;
 }
 
+/* Light theme — opt-in via `<html data-theme="light">`. Driven by
+ * `AppSettings.theme` from the renderer (see App.tsx applyTheme). Only
+ * overrides the named variables; everything in the rest of this file
+ * that references `var(--bg)` / `var(--fg)` etc. flips automatically.
+ *
+ * Caveat: a handful of accent overlays in this stylesheet use literal
+ * `rgba(255, 255, 255, X)` to mean "lighten the dark surface", which
+ * reads as "wash out the white surface" under the light theme. Those
+ * spots still look passable but may need targeted overrides over time
+ * — they're not blockers for the toggle being functional. */
+[data-theme='light'] {
+  --bg: #ffffff;
+  --bg-elev: #f5f7fa;
+  --fg: #1a1d22;
+  --fg-muted: #6b7280;
+  --accent: #3b4252;
+  --accent-hover: #4c566a;
+  --border: #d8dce3;
+  --danger: #c0392b;
+  color-scheme: light;
+}
+
+/* --- Light-theme spot overrides ----------------------------------------
+ * A handful of components were authored with hardcoded `rgba(255,255,
+ * 255,X)` overlays (meant to lighten a dark surface) and hardcoded
+ * dark hex fills (`#1f2533` for the toolbar / active tab). These read
+ * fine on the dark palette but become invisible or jarring on the
+ * light one. The block below patches just those spots without
+ * touching the dark theme's appearance. */
+[data-theme='light'] .titlebar-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+[data-theme='light'] .titlebar-leading:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+[data-theme='light'] .titlebar-leading-active {
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--fg);
+}
+
+/* Tabs: inactive uses a soft elev tone; active matches the toolbar
+ * (which itself is overridden below) so the active tab still reads as
+ * the foreground band bleeding into the toolbar. */
+[data-theme='light'] .tab {
+  background: #e6eaf0;
+  color: var(--fg-muted);
+}
+[data-theme='light'] .tab:hover {
+  background: #dde2e8;
+}
+[data-theme='light'] .tab-active,
+[data-theme='light'] .tab-active:hover {
+  background: var(--bg);
+  color: var(--fg);
+}
+[data-theme='light'] .tab-star:hover,
+[data-theme='light'] .tab-close:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* Bevel separator: white-on-light is invisible; flip both lines so the
+ * groove still reads. */
+[data-theme='light'] .pdf-paginator-sep,
+[data-theme='light'] .titlebar-sep {
+  background: rgba(0, 0, 0, 0.18);
+  box-shadow: 1px 0 0 0 rgba(255, 255, 255, 0.9);
+}
+[data-theme='light'] .titlebar-sep {
+  box-shadow: none;
+}
+
+/* Toolbar surface: the `#1f2533` hardcode plus the white-rgba bottom
+ * border don't survive the flip — paint a real light surface and a
+ * proper border, and soften the shadow so the document area below
+ * stays bright. */
+[data-theme='light'] .pdf-toolbar {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* Overflow menu items: same kind of white-on-light hover. */
+[data-theme='light'] .titlebar-tabs-overflow:hover,
+[data-theme='light'] .titlebar-tabs-overflow-open {
+  background: rgba(0, 0, 0, 0.06);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -116,7 +203,11 @@ body,
   align-items: stretch;
   height: 37px;
   background: var(--bg-elev);
-  border-bottom: 1px solid var(--border);
+  /* No border-bottom: the active tab shares its fill with the toolbar
+   * below, and a 1px divider here would cut across that connection
+   * (the issue was loudest on the light theme where var(--border) is
+   * a visible gray). macOS used to clear this selectively; we now do
+   * it globally so the active-tab → toolbar bleed works on every OS. */
   user-select: none;
   -webkit-user-select: none;
   flex-shrink: 0;
@@ -163,7 +254,10 @@ body,
   border: 0;
   border-radius: 0;
   padding: 0;
-  color: #c8cfdb;
+  /* Theme-aware icon color so the home glyph remains visible on both
+   * the dark titlebar and the light one (previous #c8cfdb hardcode
+   * disappeared on the light theme's near-white surface). */
+  color: var(--fg);
   cursor: pointer;
   transition:
     background-color 0.12s ease,
@@ -240,7 +334,10 @@ body,
   border: 0;
   border-radius: 0;
   padding: 0;
-  color: #c8cfdb;
+  /* Theme-aware icon color so the about / settings / window-control
+   * glyphs remain visible on both the dark titlebar and the light one
+   * (previous #c8cfdb hardcode disappeared on light). */
+  color: var(--fg);
   cursor: pointer;
   outline: none;
   transition:
@@ -283,16 +380,6 @@ body:not(.platform-darwin) .tab svg {
  * the title baseline. */
 body:not(.platform-darwin) .tab > svg {
   transform: translateY(-2px);
-}
-
-/* macOS: drop the titlebar's bottom border (and any toolbar top border)
- * so the active tab — which shares its fill with the toolbar — bleeds
- * straight into the toolbar without a 1px divider cutting across. */
-body.platform-darwin .titlebar {
-  border-bottom: 0;
-}
-body.platform-darwin .pdf-toolbar {
-  border-top: 0;
 }
 
 /* --- Tabs --------------------------------------------------------------- */
@@ -1485,6 +1572,158 @@ button.primary:hover {
   color: #1a1a1a;
 }
 
+/* --- Settings dialog ----------------------------------------------------
+ * Modeled on .password-dialog. Single column of "row" controls; each row
+ * is a label + description block on the left and a control on the right
+ * (a toggle switch for booleans, a segmented button group for enums). */
+.settings-dialog {
+  width: 460px;
+  max-width: 92vw;
+}
+
+.settings-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1rem 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-dialog-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.settings-dialog-body {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.95rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-row-title {
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--fg);
+  margin-bottom: 2px;
+}
+
+.settings-row-sub {
+  font-size: 0.74rem;
+  color: var(--fg-muted);
+  line-height: 1.35;
+}
+
+/* Toggle switch — the native checkbox is visually hidden but still
+ * keyboard-focusable. The track + thumb pair on its right reflects the
+ * checked state via :checked + .settings-toggle-track. */
+.settings-toggle {
+  flex-shrink: 0;
+  display: inline-block;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.settings-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+
+.settings-toggle-track {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: rgba(127, 127, 127, 0.35);
+  border-radius: 999px;
+  transition: background-color 0.15s ease;
+  position: relative;
+}
+
+.settings-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 0.15s ease;
+}
+
+.settings-toggle input:checked + .settings-toggle-track {
+  background: #6aa3ff;
+}
+
+.settings-toggle input:checked + .settings-toggle-track .settings-toggle-thumb {
+  transform: translateX(16px);
+}
+
+.settings-toggle input:focus-visible + .settings-toggle-track {
+  box-shadow: 0 0 0 2px rgba(106, 163, 255, 0.4);
+}
+
+/* Segmented button group — used for the theme picker. */
+.settings-segmented {
+  flex-shrink: 0;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.settings-segmented-btn {
+  padding: 0.35rem 0.85rem;
+  background: transparent;
+  border: 0;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.settings-segmented-btn + .settings-segmented-btn {
+  border-left: 1px solid var(--border);
+}
+
+.settings-segmented-btn:hover {
+  color: var(--fg);
+}
+
+.settings-segmented-on {
+  background: rgba(106, 163, 255, 0.18);
+  color: var(--fg);
+  font-weight: 500;
+}
+
 /* --- Protect dialog (extends password-dialog with permissions) -------- */
 .protect-dialog {
   width: 440px;
@@ -1801,9 +2040,9 @@ button.primary:hover {
   border: 1px solid transparent;
   border-radius: 5px;
   padding: 0;
-  /* Brighter than --fg-muted (#8b95a8) but not pure white — keeps the
-   * toolbar legible without screaming. */
-  color: #c8cfdb;
+  /* Theme-aware so the toolbar glyphs are legible on both palettes
+   * (was #c8cfdb hardcoded, invisible on the light surface). */
+  color: var(--fg);
 }
 
 /* Scale every glyph up proportionally to the taller toolbar so the
@@ -1910,6 +2149,13 @@ button.primary:hover {
 .titlebar-sep-right {
   margin-left: 0;
   margin-right: 0.4rem;
+}
+
+/* Separators inside `.titlebar-controls` (one before About, one after
+ * Settings on Win/Linux). Symmetric small horizontal margin since the
+ * neighboring `.titlebar-btn` elements have no margin of their own. */
+.titlebar-sep-controls {
+  margin: 0 0.4rem;
 }
 
 .pdf-paginator-form {
@@ -3322,127 +3568,54 @@ button.primary:hover {
 }
 
 /* --- Updater status row (home sidebar footer) --------------------------
- * Persistent status pinned to the bottom of the home sidebar. Three
- * visual variants driven by class modifiers:
- *   .updater-status-muted   → idle/current/error (no call-to-action)
- *   .updater-status-accent  → available/ready (download icon + action)
- * margin-top: auto pushes it to the sidebar footer regardless of nav
- * list height. */
+ * Single-line muted text pinned to the bottom of the home sidebar. No
+ * border, no background — the sidebar's own padding-bottom (1.5rem)
+ * supplies the gap from the bottom edge. Becomes a link/button row
+ * only when there's something the user can act on (available / ready). */
 .updater-status {
   margin-top: auto;
   display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.55rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  /* Sit a hair below the nav list with a small visual breath. */
-  margin-bottom: 0.25rem;
-  /* Small text so the row stays unobtrusive when nothing's happening. */
-  font-size: 0.72rem;
-  line-height: 1.2;
-  min-height: 32px;
-}
-
-.updater-status-muted {
+  align-items: baseline;
+  gap: 0.45rem;
+  padding: 0 0.55rem;
+  font-size: 0.7rem;
+  line-height: 1.3;
   color: var(--fg-muted);
 }
 
 .updater-status-accent {
   color: var(--fg);
-  border-color: rgba(106, 163, 255, 0.35);
-  background: rgba(106, 163, 255, 0.08);
 }
 
-.updater-status-icon {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-}
-
-.updater-status-accent .updater-status-icon {
-  color: #6aa3ff;
-}
-
-.updater-status-body {
+.updater-status-text {
   flex: 1 1 auto;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.updater-status-title {
-  font-weight: 500;
-  color: inherit;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.updater-status-sub {
-  font-size: 0.68rem;
-  color: var(--fg-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.updater-status-action {
+.updater-status-link {
   flex-shrink: 0;
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
   background: transparent;
-  color: var(--fg);
+  border: 0;
+  padding: 0;
+  color: #6aa3ff;
   font: inherit;
   font-size: 0.7rem;
-  font-weight: 500;
   text-decoration: none;
   cursor: pointer;
-  white-space: nowrap;
-  transition:
-    background-color 0.12s ease,
-    border-color 0.12s ease;
 }
 
-.updater-status-action:hover {
-  background: rgba(106, 163, 255, 0.14);
-  border-color: #6aa3ff;
+.updater-status-link:hover {
+  text-decoration: underline;
 }
 
-.updater-status-action-primary {
-  background: #6aa3ff;
-  border-color: #6aa3ff;
-  color: #0f1115;
-}
-
-.updater-status-action-primary:hover {
-  background: #82b4ff;
-  border-color: #82b4ff;
-  color: #0f1115;
-}
-
-.updater-status-action-muted {
-  cursor: default;
+.updater-status-link-muted {
   color: var(--fg-muted);
-  border-color: transparent;
-  padding-right: 0;
-  padding-left: 0;
+  cursor: default;
 }
 
-.updater-status-action-muted:hover {
-  background: transparent;
-  border-color: transparent;
-}
-
-.updater-spinner {
-  animation: updater-spin 1s linear infinite;
-}
-
-@keyframes updater-spin {
-  to {
-    transform: rotate(360deg);
-  }
+.updater-status-link-muted:hover {
+  text-decoration: none;
 }

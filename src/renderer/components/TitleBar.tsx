@@ -4,6 +4,7 @@ import { useTabsStore, type PdfTab } from '../stores/tabs.js';
 import { ipc } from '../lib/ipc.js';
 import iconUrl from '../assets/icon.png';
 import { AboutDialog } from './AboutDialog.js';
+import { SettingsDialog } from './SettingsDialog.js';
 
 // Layout caps mirrored from .tab in global.css. Used only as fallbacks
 // when measurement hasn't run yet — the actual widths come from the
@@ -30,6 +31,7 @@ export function TitleBar(): JSX.Element {
 
   const [maximized, setMaximized] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const tabsContainerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
@@ -158,13 +160,15 @@ export function TitleBar(): JSX.Element {
       {isMac ? (
         <div className="titlebar-traffic-light-slot" aria-hidden />
       ) : (
-        <>
-          <div className="titlebar-brand">
-            <img src={iconUrl} alt="NodePDF" className="titlebar-icon" draggable={false} />
-          </div>
-          <span className="titlebar-sep" aria-hidden />
-        </>
+        <div className="titlebar-brand">
+          <img src={iconUrl} alt="NodePDF" className="titlebar-icon" draggable={false} />
+        </div>
       )}
+      {/* Left bevel separator: rendered on every platform so the home
+       * button reads as a distinct section. On Win/Linux it sits between
+       * the brand icon and the home button; on macOS between the
+       * traffic-light slot and the home button. */}
+      <span className="titlebar-sep" aria-hidden />
 
       <button
         type="button"
@@ -240,6 +244,10 @@ export function TitleBar(): JSX.Element {
       </div>
 
       <div className="titlebar-controls">
+        {/* Bevel separator between the tab area and the app-action
+         * buttons (About / Settings). Symmetric small margin via the
+         * `titlebar-sep-controls` modifier. */}
+        <span className="titlebar-sep titlebar-sep-controls" aria-hidden />
         <button
           type="button"
           className="titlebar-btn titlebar-btn-about"
@@ -259,8 +267,39 @@ export function TitleBar(): JSX.Element {
             <circle cx="7" cy="10.2" r="0.7" fill="currentColor" />
           </svg>
         </button>
+        <button
+          type="button"
+          className="titlebar-btn titlebar-btn-settings"
+          aria-label="Settings"
+          title="Settings"
+          onClick={() => setSettingsOpen(true)}
+        >
+          {/* Lucide "settings" gear: outer cogwheel path + inner circle.
+           * 24x24 viewBox kept (matches the upstream path); stroke width
+           * trimmed so it visually weighs the same as the About glyph. */}
+          <svg
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
         {!isMac && (
           <>
+            {/* Bevel separator between the app-action buttons and the
+             * native window controls (min / max / close). Only meaningful
+             * on Win/Linux — macOS hides its window controls (traffic
+             * lights live in the left slot), so a separator here would
+             * float at the right edge of the titlebar. */}
+            <span className="titlebar-sep titlebar-sep-controls" aria-hidden />
             <button type="button" className="titlebar-btn" aria-label="Minimize" onClick={onMinimize}>
               <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
                 <rect x="1" y="4.5" width="8" height="1" fill="currentColor" />
@@ -298,6 +337,7 @@ export function TitleBar(): JSX.Element {
       </div>
 
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

@@ -74,6 +74,10 @@ export interface HomeFolder {
  *                 or the release page.
  *   ready     → Win/macOS only: bits downloaded, click → quitAndInstall.
  *   error     → most recent check failed; surfaces as a muted status.
+ *   disabled  → user opted out via Settings → "Check for updates on
+ *               startup". No network has been touched; the renderer
+ *               shows just the current version with no "up to date"
+ *               claim (which would be misleading without a check).
  */
 export type UpdaterStatus =
   | 'idle'
@@ -81,7 +85,8 @@ export type UpdaterStatus =
   | 'current'
   | 'available'
   | 'ready'
-  | 'error';
+  | 'error'
+  | 'disabled';
 
 export interface UpdaterState {
   status: UpdaterStatus;

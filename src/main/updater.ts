@@ -4,6 +4,7 @@ import { updateElectronApp, UpdateSourceType } from 'update-electron-app';
 import { IPC_CHANNELS } from '~shared/types/ipc.js';
 import type { UpdaterState, UpdaterStatus } from '~shared/types/ipc.js';
 import { handle } from './ipc/register.js';
+import { getSettings } from './settings/store.js';
 
 const GH_OWNER = 'remdph';
 const GH_REPO = 'node-pdf';
@@ -74,6 +75,13 @@ export function setupUpdater(): void {
   setState({ currentVersion: app.getVersion() });
   registerUpdaterIpc();
 
+  // Defer the actual updater wiring until we've consulted the user's
+  // `checkUpdatesOnStartup` setting. Fire-and-forget — main doesn't
+  // need to await this; the renderer reads state via IPC.
+  void bootstrap();
+}
+
+async function bootstrap(): Promise<void> {
   const debug = process.env.NODEPDF_UPDATER_DEBUG?.trim();
 
   if (debug === 'fake' || debug === '1') {
@@ -95,6 +103,20 @@ export function setupUpdater(): void {
     // spinner from the initial `idle` state.
     setState({ status: 'current', latestVersion: state.currentVersion });
     return;
+  }
+
+  // User opt-out (Settings → "Check for updates on startup"). Debug
+  // overrides ignore this flag so we can still smoke-test from dev.
+  // `disabled` (not `current`) — we never contacted the network, so
+  // claiming "up to date" would be a lie.
+  try {
+    const settings = await getSettings();
+    if (!settings.checkUpdatesOnStartup && !debugCurrent && debug !== 'fake' && debug !== '1') {
+      setState({ status: 'disabled' });
+      return;
+    }
+  } catch (err) {
+    console.warn('[updater] settings read failed; defaulting to check enabled', err);
   }
 
   if ((process.platform === 'win32' || process.platform === 'darwin') && !debugCurrent) {
