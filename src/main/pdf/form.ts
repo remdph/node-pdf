@@ -1,13 +1,24 @@
 import fs from 'node:fs/promises';
 import {
+  PDFArray,
   PDFCheckBox,
+  PDFDict,
   PDFDocument,
   PDFDropdown,
+  PDFName,
   PDFOptionList,
   PDFRadioGroup,
+  PDFRef,
   PDFSignature,
   PDFTextField,
+  drawObject,
+  popGraphicsState,
+  pushGraphicsState,
+  rotateInPlace,
+  translate,
   type PDFField,
+  type PDFForm,
+  type PDFPage,
 } from '@cantoo/pdf-lib';
 
 import { NodePdfError } from '~shared/types/errors.js';
@@ -18,6 +29,7 @@ import type {
   FormFieldType,
   FormInfo,
 } from '~shared/types/forms.js';
+import { captureEncryptionRef, restoreEncryptionRef } from './encryption-preserve.js';
 import { safeWritePdf } from './safe-write.js';
 
 function classifyField(field: PDFField): FormFieldType {
@@ -151,10 +163,35 @@ export async function fillForm(input: FillFormInput): Promise<FillFormResult> {
     throw new NodePdfError('READ_FAILED', `Failed to read PDF: ${filePath}`, err);
   }
 
+  // Load strategy depends on mode:
+  //   - 'keep': incremental save preserves existing signatures and
+  //     leaves the form editable. `forIncrementalUpdate: true`
+  //     arms pdf-lib's snapshot tracker so `commit()` writes a delta.
+  //   - 'flatten': full save. Background — pdf-lib's
+  //     `form.flatten()` combined with `commit({useObjectStreams:
+  //     false})` is a known-broken combo: it mutates the catalog
+  //     while writing an incremental section, leaving pdf.js with an
+  //     "Invalid Root reference" on the next open (Hopding/pdf-lib
+  //     issues #1267, #1482, #1224, #1485; cantoo fork inherits
+  //     them and adds new ones because commit() layers a fresh
+  //     xref over a partially-mutated catalog). The verified fix
+  //     is to skip pdf-lib's flatten entirely (we draw widget
+  //     appearances onto pages manually in `manualFlatten` below)
+  //     and full-save with `doc.save()`. Flatten already invalidates
+  //     any prior form-aware signatures, so giving up incremental
+  //     preservation costs nothing.
+  const isFlatten = mode === 'flatten';
+
+  // Capture original /Encrypt trailer ref so we can re-attach it
+  // before save — pdf-lib strips it when decrypting with a password,
+  // which would leave the saved file looking unencrypted to viewers
+  // (blank pages because content streams stay encrypted).
+  const encryptRef = password ? await captureEncryptionRef(bytes) : null;
+
   let doc: PDFDocument;
   try {
     doc = await PDFDocument.load(bytes, {
-      forIncrementalUpdate: true,
+      ...(isFlatten ? {} : { forIncrementalUpdate: true }),
       ...(password ? { password } : {}),
     });
   } catch (err) {
@@ -242,19 +279,25 @@ export async function fillForm(input: FillFormInput): Promise<FillFormResult> {
     }
   }
 
-  if (mode === 'flatten') {
+  if (isFlatten) {
     try {
-      form.flatten();
+      manualFlatten(doc, form);
     } catch (err) {
       throw new NodePdfError('READ_FAILED', 'Form flatten failed', err);
     }
   }
 
+  // Re-attach /Encrypt to the trailer BEFORE serializing so the
+  // emitted output still flags the file as encrypted.
+  restoreEncryptionRef(doc, encryptRef);
+
   let outBytes: Uint8Array;
   try {
-    outBytes = await doc.commit({ useObjectStreams: false });
+    outBytes = isFlatten
+      ? await doc.save({ useObjectStreams: false })
+      : await doc.commit({ useObjectStreams: false });
   } catch (err) {
-    console.error('[fillForm] commit failed:', err);
+    console.error('[fillForm] serialize failed:', err);
     throw new NodePdfError('READ_FAILED', 'Failed to serialize PDF', err);
   }
 
@@ -262,3 +305,193 @@ export async function fillForm(input: FillFormInput): Promise<FillFormResult> {
 
   return { written, skipped };
 }
+
+/**
+ * Manual replacement for `form.flatten()`. Skips pdf-lib's flatten
+ * entirely because the combination of `form.flatten()` +
+ * `commit({ useObjectStreams: false })` is a known-bad combo that
+ * leaves pdf.js with "Invalid Root reference" on the next open
+ * (see issue thread links in the load comment above). What pdf-lib
+ * does wrong:
+ *   - The per-widget draw loop is wrapped in a try/catch but the
+ *     subsequent `removeField` only PARTIALLY catches its own
+ *     findWidgetPage throws — the dict-removal phase still mutates
+ *     /AcroForm.Fields and deletes child refs even when the widget
+ *     was orphan. The result is dangling refs in the trailer.
+ *   - `commit({useObjectStreams:false})` layers a fresh xref over
+ *     the partially-mutated catalog; pdf.js's strict parser bails.
+ *
+ * Our pipeline (qpdf's `--generate-appearances --flatten-annotations
+ * --remove-acroform` recipe):
+ *   1. `updateFieldAppearances()` — regenerate appearance streams
+ *      while the form is still intact, using the default font
+ *      pdf-lib embeds on demand.
+ *   2. For each field's widgets, find its page (with the same
+ *      two-step lookup pdf-lib uses internally); if found, register
+ *      the widget's normal-appearance ref as an XObject on the
+ *      page, then push draw operators onto the page content stream.
+ *      Orphan widgets are silently skipped — no draw, no error.
+ *   3. Remove the widget annotation from the page's /Annots so it
+ *      doesn't render as an interactive overlay on top of the
+ *      baked-in graphics.
+ *   4. Clear `/AcroForm.Fields` on the catalog so readers don't see
+ *      any fields anymore. We deliberately do NOT delete the field
+ *      / widget dicts themselves — pdf-lib's full save will
+ *      garbage-collect anything unreferenced, and leaving them
+ *      alone avoids the dangling-ref class of corruption.
+ *
+ * Caller must use `doc.save()` (full save) afterwards — not
+ * `doc.commit()` — because we've mutated the catalog.
+ */
+function manualFlatten(doc: PDFDocument, form: PDFForm): void {
+  // Force every field to regenerate its appearance stream — NOT just
+  // the dirty ones. pdf-lib's `updateFieldAppearances()` skips fields
+  // whose widget already has a `/AP /N` stream on disk (the upstream
+  // `needsAppearancesUpdate()` short-circuit). That breaks the
+  // keep-then-flatten flow: the keep save wrote the field /V to disk
+  // with a stub /AP /N, the renderer reloaded, the next-session
+  // flatten finds the field "not dirty" and re-uses the stale
+  // appearance — which for text fields is often empty, so flattened
+  // text comes out blank. Marking everything dirty before update
+  // forces regen from the current /V state for every field type.
+  for (const field of form.getFields()) {
+    if (field instanceof PDFSignature) continue;
+    form.markFieldAsDirty(field.ref);
+  }
+  form.updateFieldAppearances();
+
+  const pages = doc.getPages();
+  const pageByRef = new Map<PDFRef, PDFPage>();
+  for (const p of pages) pageByRef.set(p.ref, p);
+
+  const fields = form.getFields();
+  for (const field of fields) {
+    const widgets = field.acroField.getWidgets();
+    for (const widget of widgets) {
+      const page = resolveWidgetPage(doc, widget, pageByRef);
+      if (!page) continue;
+
+      let appearanceRef: PDFRef | null = null;
+      try {
+        appearanceRef = resolveWidgetAppearanceRef(doc, field, widget);
+      } catch {
+        // No usable appearance (e.g. signature placeholder with no
+        // /AP). Skip drawing but still remove the widget from the
+        // page so it doesn't render as an interactive overlay.
+        appearanceRef = null;
+      }
+
+      if (appearanceRef) {
+        try {
+          const xObjectKey = page.node.newXObject('FlatWidget', appearanceRef);
+          const rect = widget.getRectangle();
+          const ops = [
+            pushGraphicsState(),
+            translate(rect.x, rect.y),
+            ...rotateInPlace({ ...rect, rotation: 0 }),
+            drawObject(xObjectKey),
+            popGraphicsState(),
+          ];
+          page.pushOperators(...ops);
+        } catch (err) {
+          // Drawing failed for this widget — log and continue. The
+          // widget will end up un-baked but the rest of the flatten
+          // proceeds. Better than throwing and aborting the save.
+          console.warn(
+            `[manualFlatten] draw failed for field "${field.getName()}"`,
+            err,
+          );
+        }
+      }
+
+      // Remove the widget annotation from the page so the flattened
+      // PDF doesn't render an interactive layer on top of our
+      // baked-in graphics. Best-effort — guard against undefined ref.
+      const widgetRef = doc.context.getObjectRef(widget.dict);
+      if (widgetRef) {
+        try {
+          page.node.removeAnnot(widgetRef);
+        } catch {
+          // Annot wasn't in this page's /Annots — fine, nothing to do.
+        }
+      }
+    }
+  }
+
+  // Clear /AcroForm.Fields so readers see "no form fields" but keep
+  // the /AcroForm dict itself (some readers expect it). Deleting the
+  // field dicts is what triggers pdf-lib's dangling-ref bug — leave
+  // them alone and let `doc.save()`'s object collector decide what's
+  // reachable.
+  try {
+    const acroFormRaw = doc.catalog.get(PDFName.of('AcroForm'));
+    let acroForm: PDFDict | null = null;
+    if (acroFormRaw instanceof PDFRef) {
+      acroForm = doc.context.lookup(acroFormRaw, PDFDict);
+    } else if (acroFormRaw instanceof PDFDict) {
+      acroForm = acroFormRaw;
+    }
+    if (acroForm) {
+      acroForm.set(PDFName.of('Fields'), doc.context.obj([]));
+    }
+  } catch (err) {
+    console.warn('[manualFlatten] could not clear /AcroForm.Fields', err);
+  }
+}
+
+/**
+ * pdf-lib's two-step lookup, repackaged so callers get null instead
+ * of a throw for orphan widgets:
+ *   1. Match `widget.P()` against the page tree.
+ *   2. Fall back to walking every page's /Annots for the widget's
+ *      own ref.
+ *   3. Return null if both fail.
+ */
+function resolveWidgetPage(
+  doc: PDFDocument,
+  widget: ReturnType<PDFField['acroField']['getWidgets']>[number],
+  pageByRef: Map<PDFRef, PDFPage>,
+): PDFPage | null {
+  const p = widget.P();
+  if (p instanceof PDFRef) {
+    const direct = pageByRef.get(p);
+    if (direct) return direct;
+  }
+  const widgetRef = doc.context.getObjectRef(widget.dict);
+  if (!widgetRef) return null;
+  try {
+    const page = doc.findPageForAnnotationRef(widgetRef);
+    return page ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the widget's normal-appearance ref, with the special
+ * handling pdf-lib applies to checkbox/radio widgets (where the
+ * /AP/N dict is keyed by export value, and we pick the entry
+ * matching the field's current selection or fall back to "Off").
+ */
+function resolveWidgetAppearanceRef(
+  doc: PDFDocument,
+  field: PDFField,
+  widget: ReturnType<PDFField['acroField']['getWidgets']>[number],
+): PDFRef {
+  let refOrDict: unknown = widget.getNormalAppearance();
+  if (field instanceof PDFCheckBox || field instanceof PDFRadioGroup) {
+    if (refOrDict instanceof PDFRef) {
+      refOrDict = doc.context.lookup(refOrDict, PDFDict);
+    }
+    if (refOrDict instanceof PDFDict) {
+      const value = (field.acroField as { getValue(): PDFName }).getValue();
+      const picked = refOrDict.get(value) ?? refOrDict.get(PDFName.of('Off'));
+      if (picked instanceof PDFRef) refOrDict = picked;
+    }
+  }
+  if (!(refOrDict instanceof PDFRef)) {
+    throw new Error(`No appearance ref for field "${field.getName()}"`);
+  }
+  return refOrDict;
+}
+

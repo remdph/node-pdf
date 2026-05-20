@@ -264,7 +264,18 @@ export function SignaturePanel({
                     )}
                   </span>
                 </div>
-                <span className="signature-row-meta">
+                <span
+                  className="signature-row-meta"
+                  // Red when the CMS hash check failed — this is the
+                  // "the document was tampered with after signing"
+                  // case and deserves visual urgency that the
+                  // muted-meta default doesn't convey.
+                  style={
+                    sig.integrity === 'invalid'
+                      ? { color: 'var(--danger)' }
+                      : undefined
+                  }
+                >
                   {sig.integrity === 'unknown'
                     ? unknownReason(sig.subFilter)
                     : INTEGRITY_TEXT[sig.integrity]}

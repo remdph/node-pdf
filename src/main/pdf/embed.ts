@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { PDFDocument } from '@cantoo/pdf-lib';
 
 import { NodePdfError } from '~shared/types/errors.js';
+import { captureEncryptionRef, restoreEncryptionRef } from './encryption-preserve.js';
 import { safeWritePdf } from './safe-write.js';
 
 export type ImageFormat = 'png' | 'jpg' | 'jpeg';
@@ -55,6 +56,11 @@ export async function embedImageOnPage(input: EmbedImageInput): Promise<void> {
     throw new NodePdfError('READ_FAILED', `Failed to read PDF: ${filePath}`, err);
   }
 
+  // Capture original /Encrypt trailer ref BEFORE pdf-lib strips it
+  // during decryption — without re-attaching at commit time the
+  // saved file would lose its encryption flag and render blank.
+  const encryptRef = password ? await captureEncryptionRef(pdfBytes) : null;
+
   let doc: PDFDocument;
   try {
     doc = await PDFDocument.load(pdfBytes, {
@@ -89,6 +95,12 @@ export async function embedImageOnPage(input: EmbedImageInput): Promise<void> {
   const drawY = pageH - rect.y * pageH - drawH;
 
   page.drawImage(image, { x: drawX, y: drawY, width: drawW, height: drawH });
+
+  // Re-attach /Encrypt before serialization so the new trailer still
+  // references the encryption dict; otherwise pdf.js opens the saved
+  // file as if it were unencrypted and renders the still-encrypted
+  // content streams as blank pages.
+  restoreEncryptionRef(doc, encryptRef);
 
   let outBytes: Uint8Array;
   try {

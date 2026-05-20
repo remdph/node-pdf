@@ -668,16 +668,26 @@ button:hover {
   color: var(--accent);
 }
 
+/* Primary CTA — used by the placement action bar's Apply / Sign /
+ * Sign digitally button and any other `<button className="primary">`
+ * in the chrome. Matches the green tint of the dialog primary buttons
+ * so all "confirm / write" actions share the same visual weight. */
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: #16a34a;
+  border-color: #16a34a;
   color: #fff;
   font-weight: 600;
 }
 
-button.primary:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+button.primary:hover:not(:disabled) {
+  background: #15803d;
+  border-color: #15803d;
+  color: #fff;
+}
+
+button.primary:disabled {
+  background: #16a34a;
+  border-color: #16a34a;
   color: #fff;
 }
 
@@ -1742,6 +1752,67 @@ button.primary:hover {
   background: rgba(106, 163, 255, 0.18);
   color: var(--fg);
   font-weight: 500;
+}
+
+/* --- Save form dialog -------------------------------------------------
+ * Confirmation prompt shown when the user clicks the toolbar Save
+ * button. Two-radio choice (keep editable vs flatten/lock). Reuses
+ * the `.password-dialog` shell and the `.settings-dialog-header`
+ * title styling. */
+.save-form-dialog {
+  width: 460px;
+  max-width: 92vw;
+}
+
+.save-form-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.save-form-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.save-form-option:hover {
+  border-color: rgba(106, 163, 255, 0.45);
+}
+
+.save-form-option:has(input:checked) {
+  border-color: #6aa3ff;
+  background: rgba(106, 163, 255, 0.08);
+}
+
+.save-form-option input[type='radio'] {
+  flex-shrink: 0;
+  margin: 3px 0 0 0;
+  accent-color: #6aa3ff;
+}
+
+.save-form-option-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.save-form-option-title {
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--fg);
+  margin-bottom: 2px;
+}
+
+.save-form-option-sub {
+  font-size: 0.74rem;
+  color: var(--fg-muted);
+  line-height: 1.4;
 }
 
 /* Plain action button for rows like "Check for updates now". */
@@ -3215,15 +3286,27 @@ button.primary:hover {
   color: var(--accent-hover);
 }
 
+/* Primary CTA in floating dialogs (Save form, digital sign, protect,
+ * password, etc.) — green to read as a "confirm / proceed" action,
+ * distinct from the muted slate accents used elsewhere in the chrome. */
 .signature-editor-btn.is-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #111;
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #ffffff;
 }
 
 .signature-editor-btn.is-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: #15803d;
+  border-color: #15803d;
+  color: #ffffff;
+}
+
+.signature-editor-btn.is-primary:disabled {
+  /* Keep the green tint visible at low opacity rather than going slate,
+   * so disabled state still reads as "this is the primary action". */
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #ffffff;
 }
 
 .signature-editor-btn:disabled {

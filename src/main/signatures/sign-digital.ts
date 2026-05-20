@@ -19,6 +19,7 @@ import type { NormRect } from '~shared/types/stamps.js';
 
 import { readCertP12 } from '../certs/storage.js';
 import { parseP12 } from '../certs/crypto.js';
+import { captureEncryptionRef, restoreEncryptionRef } from '../pdf/encryption-preserve.js';
 import { safeWritePdf } from '../pdf/safe-write.js';
 import { fetchOcspResponseRaw } from './ocsp.js';
 import { findSignature } from './storage.js';
@@ -693,6 +694,13 @@ export async function signPdfDigitally(opts: SignDigitalOptions): Promise<void> 
   // already armed context.snapshot, takeSnapshot returns a NEW empty
   // snapshot that won't reflect any of our mutations. The auto-tracked
   // snapshot inside context.snapshot is the one commit() consults.
+  // Capture the trailer's /Encrypt ref BEFORE pdf-lib's password
+  // decryption strips it (see captureEncryptionRef docs for the full
+  // story). We re-attach it just before commit so the new trailer
+  // still points at the encryption dict — otherwise pdf.js renders
+  // the encrypted content streams as blank pages on reopen.
+  const encryptRef = opts.password ? await captureEncryptionRef(pdfBytes) : null;
+
   let doc: PDFDocument;
   try {
     doc = await PDFDocument.load(pdfBytes, {
@@ -784,6 +792,11 @@ export async function signPdfDigitally(opts: SignDigitalOptions): Promise<void> 
     },
     visible,
   );
+
+  // Restore the trailer's /Encrypt ref so the new trailer pdf-lib
+  // emits still flags the file as encrypted. Without this, the
+  // serialized output omits /Encrypt and viewers blank the pages.
+  restoreEncryptionRef(doc, encryptRef);
 
   // Object streams MUST be off — placeholder bytes need to be findable in
   // the raw output, and stream compression would mask them. commit() does

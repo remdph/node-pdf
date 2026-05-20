@@ -25,6 +25,7 @@ import { DigitalSignDialog } from './DigitalSignDialog.js';
 import { PasswordDialog } from './PasswordDialog.js';
 import { PrintDialog } from './PrintDialog.js';
 import { ProtectDialog } from './ProtectDialog.js';
+import { SaveFormDialog } from './SaveFormDialog.js';
 import { SignaturePanel } from './SignaturePanel.js';
 import { SignaturesMenu } from './SignaturesMenu.js';
 import { StampsMenu } from './StampsMenu.js';
@@ -220,6 +221,7 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
   const [formInfo, setFormInfo] = useState<FormInfo | null>(null);
   const [formDirty, setFormDirty] = useState(false);
   const [savingForm, setSavingForm] = useState(false);
+  const [saveFormDialogOpen, setSaveFormDialogOpen] = useState(false);
   // Live filled-count override that reflects in-progress edits in
   // pdf.js's annotationStorage. Falls back to `formInfo.filledCount`
   // (the disk snapshot) when null, which covers the initial paint
@@ -1328,35 +1330,44 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     return Object.keys(values).length > 0 ? values : null;
   }, [buildWidgetMeta, formInfo]);
 
-  // Persist pending form edits when the user clicks the toolbar
-  // Save button. Triggers a reload so the post-save snapshot
-  // becomes the new annotationStorage baseline.
-  const handleSaveForm = useCallback(async () => {
-    if (!formInfo?.hasForm) return;
-    setSavingForm(true);
-    try {
-      const values = await harvestFormValues();
-      if (!values) return;
-      const result = await ipc.pdf.fillForm({
-        filePath,
-        values,
-        mode: 'keep',
-        password: unlockedPassword ?? undefined,
-      });
-      if (result.skipped.length > 0) {
-        console.warn('[PdfView] fillForm skipped fields', result.skipped);
+  // Persist pending form edits. `mode='keep'` (default) keeps the
+  // form editable for future fills; `mode='flatten'` bakes the values
+  // into page graphics so the form is locked. Triggers a reload so
+  // the post-save snapshot becomes the new annotationStorage baseline.
+  //
+  // Flatten can run even when there are NO live edits — the user might
+  // open a pre-filled PDF and click Save → "Lock form" to flatten the
+  // existing values into the page. Keep-mode with no edits is a no-op
+  // (early return) since there's nothing to persist.
+  const handleSaveForm = useCallback(
+    async (mode: 'keep' | 'flatten' = 'keep'): Promise<void> => {
+      if (!formInfo?.hasForm) return;
+      setSavingForm(true);
+      try {
+        const values = await harvestFormValues();
+        if (!values && mode !== 'flatten') return;
+        const result = await ipc.pdf.fillForm({
+          filePath,
+          values: values ?? {},
+          mode,
+          password: unlockedPassword ?? undefined,
+        });
+        if (result.skipped.length > 0) {
+          console.warn('[PdfView] fillForm skipped fields', result.skipped);
+        }
+        snapshotCacheRef.current?.clear();
+        restorePageRef.current = activePage;
+        setRestoring(true);
+        setFormDirty(false);
+        setReloadKey((k) => k + 1);
+      } catch (err) {
+        console.error('[PdfView] fillForm failed', err);
+      } finally {
+        setSavingForm(false);
       }
-      snapshotCacheRef.current?.clear();
-      restorePageRef.current = activePage;
-      setRestoring(true);
-      setFormDirty(false);
-      setReloadKey((k) => k + 1);
-    } catch (err) {
-      console.error('[PdfView] fillForm failed', err);
-    } finally {
-      setSavingForm(false);
-    }
-  }, [activePage, filePath, formInfo, harvestFormValues, unlockedPassword]);
+    },
+    [activePage, filePath, formInfo, harvestFormValues, unlockedPassword],
+  );
 
   // Silently persist pending form edits before any mutation that
   // would otherwise read a stale on-disk version (stamps, visual
@@ -1804,19 +1815,24 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
             <button
               type="button"
               className={`pdf-tool${formDirty ? ' pdf-tool-active' : ''}`}
-              onClick={() => void handleSaveForm()}
+              onClick={() => setSaveFormDialogOpen(true)}
               aria-label="Save form"
               title={
                 formDirty
-                  ? 'Save filled form values'
-                  : 'No form changes to save'
+                  ? 'Save form changes'
+                  : 'Save or lock form'
               }
-              disabled={!isReady || savingForm || !formDirty}
+              // Stay enabled even when nothing's dirty — opening a PDF
+              // with pre-filled fields, the user can click here just
+              // to flatten the existing values into the page (via the
+              // dialog's "Lock form" radio).
+              disabled={!isReady || savingForm}
             >
-              {/* Swap form glyph → floppy disk once there are unsaved
-               * edits so the toolbar reads as an actionable "Save"
-               * button rather than the neutral form indicator. */}
-              {formDirty ? <SaveIcon /> : <FormIcon />}
+              {/* Always the floppy disk now: the button is actionable
+               * the moment a form has any filled values (the user can
+               * lock/flatten without typing anything), so a neutral
+               * "form indicator" icon would understate it. */}
+              <SaveIcon />
             </button>
           )}
         </div>
@@ -2233,6 +2249,17 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
           filePath={filePath}
           title={filePath.split(/[\\/]/).pop() ?? filePath}
           onClose={() => setPrintOpen(false)}
+        />
+      )}
+
+      {saveFormDialogOpen && (
+        <SaveFormDialog
+          busy={savingForm}
+          onClose={() => setSaveFormDialogOpen(false)}
+          onSave={async (mode) => {
+            await handleSaveForm(mode);
+            setSaveFormDialogOpen(false);
+          }}
         />
       )}
 
@@ -2772,23 +2799,6 @@ function SignatureIcon(): JSX.Element {
 /** Rubber stamp silhouette — square pad, neck, and round handle on top,
  * plus the implied surface underline. Reads as "rubber stamp" at toolbar
  * size where finer detail would muddle. */
-function FormIcon(): JSX.Element {
-  // Document with two filled lines + a checkbox in the corner — reads
-  // as "fillable form" at the 18×18 toolbar size without being noisy.
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
-      <path
-        d="M3.5 2.5h8L14.5 5.5v10a0.5 0.5 0 0 1 -0.5 0.5H3.5a0.5 0.5 0 0 1 -0.5 -0.5V3a0.5 0.5 0 0 1 0.5 -0.5z"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
-      <path d="M11.5 2.5V5.5H14.5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-      <path d="M5.5 9h7 M5.5 11.5h7 M5.5 14h4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function SaveIcon(): JSX.Element {
   // Classic floppy disk: outer rounded square + notched top label
   // strip + inset bottom panel. Universally read as "save".
