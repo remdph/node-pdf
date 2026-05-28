@@ -1901,6 +1901,103 @@ button.primary:disabled {
   cursor: not-allowed;
 }
 
+/* --- Split dialog ------------------------------------------------------ */
+.split-dialog {
+  width: 520px;
+  max-width: 92vw;
+}
+
+.split-parts-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.split-parts-stepper button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  border-radius: 4px;
+}
+
+.split-parts-stepper span {
+  font-size: 0.95rem;
+  font-weight: 600;
+  min-width: 24px;
+  text-align: center;
+}
+
+.split-ranges {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.split-range-row {
+  display: grid;
+  grid-template-columns: 60px 1fr 24px 1fr 36px;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.split-range-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+
+.split-range-input {
+  text-align: center;
+  max-width: 72px;
+}
+
+.split-range-to {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  text-align: center;
+}
+
+.split-range-count {
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+  text-align: right;
+}
+
+.split-range-error .password-dialog-input {
+  border-color: var(--danger);
+}
+
+.split-preview-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  gap: 2px;
+}
+
+.split-preview-segment {
+  height: 100%;
+  border-radius: 2px;
+  transition: opacity 0.12s ease;
+}
+
+.split-open-after {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.split-open-after input {
+  accent-color: var(--accent);
+}
+
 /* --- Print dialog (modal) --------------------------------------------- */
 .print-dialog-backdrop {
   position: fixed;

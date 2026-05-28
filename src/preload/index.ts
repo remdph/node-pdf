@@ -7,6 +7,8 @@ import type {
   PrinterInfo,
   PrintOptions,
   ProtectInput,
+  SplitInput,
+  SplitResult,
   UpdaterState,
 } from '~shared/types/ipc.js';
 import type {
@@ -81,6 +83,8 @@ const api = {
       invoke<FormInfo>(IPC_CHANNELS.pdf.getFormInfo, filePath, password),
     fillForm: (input: FillFormInput) =>
       invoke<FillFormResult>(IPC_CHANNELS.pdf.fillForm, input),
+    split: (input: SplitInput) =>
+      invoke<SplitResult>(IPC_CHANNELS.pdf.split, input),
   },
   printer: {
     list: () => invoke<PrinterInfo[]>(IPC_CHANNELS.printer.list),

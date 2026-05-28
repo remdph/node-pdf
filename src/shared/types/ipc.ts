@@ -51,6 +51,24 @@ export interface ProtectInput {
   permissions?: PdfPermissions;
 }
 
+export interface SplitRange {
+  /** 1-based start page (inclusive). */
+  start: number;
+  /** 1-based end page (inclusive). */
+  end: number;
+}
+
+export interface SplitInput {
+  filePath: string;
+  ranges: SplitRange[];
+  openAfterSave: boolean;
+  password?: string;
+}
+
+export interface SplitResult {
+  savedPaths: string[];
+}
+
 export interface HomeFolder {
   /** Display label (e.g. "Downloads"). */
   name: string;
@@ -246,6 +264,7 @@ export const IPC_CHANNELS = {
     fillForm: 'pdf:fill-form',
     print: 'pdf:print',
     protect: 'pdf:protect',
+    split: 'pdf:split',
   },
   stamps: {
     list: 'stamps:list',

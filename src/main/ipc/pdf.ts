@@ -15,10 +15,13 @@ import type {
   PrinterInfo,
   PrintOptions,
   ProtectInput,
+  SplitInput,
+  SplitResult,
 } from '~shared/types/ipc.js';
 import type { ApplyStampInput, ApplyStampResult } from '~shared/types/stamps.js';
 import { embedImageOnPage } from '../pdf/embed.js';
 import { toPdfLibPermissions, type PdfDocumentLike } from '../pdf/encryption.js';
+import { safeWritePdf } from '../pdf/safe-write.js';
 import { fillForm, inspectForm } from '../pdf/form.js';
 import { findStamp } from '../stamps/storage.js';
 import { handle } from './register.js';
@@ -329,4 +332,103 @@ export function registerPdfIpc(): void {
       return [];
     }
   });
+
+  handle<[SplitInput], SplitResult>(
+    IPC_CHANNELS.pdf.split,
+    async (event, input) => {
+      if (!input || typeof input.filePath !== 'string' || !path.isAbsolute(input.filePath)) {
+        throw new NodePdfError('INVALID_PATH', 'Invalid PDF path');
+      }
+      if (!Array.isArray(input.ranges) || input.ranges.length === 0) {
+        throw new NodePdfError('VALIDATION_ERROR', 'At least one part is required');
+      }
+
+      let pdfBytes: Buffer;
+      try {
+        pdfBytes = await fs.readFile(input.filePath);
+      } catch (err) {
+        throw new NodePdfError('READ_FAILED', `Failed to read PDF: ${input.filePath}`, err);
+      }
+
+      let srcDoc: PDFDocument;
+      try {
+        srcDoc = await PDFDocument.load(pdfBytes, input.password ? { password: input.password } : undefined);
+      } catch (err) {
+        throw new NodePdfError('INVALID_PDF', 'Could not parse PDF', err);
+      }
+
+      const totalPages = srcDoc.getPageCount();
+
+      // Validate all ranges upfront.
+      for (let i = 0; i < input.ranges.length; i++) {
+        const r = input.ranges[i]!;
+        if (!Number.isInteger(r.start) || r.start < 1 || r.start > totalPages) {
+          throw new NodePdfError('VALIDATION_ERROR', `Range ${i + 1}: start must be 1-${totalPages}`);
+        }
+        if (!Number.isInteger(r.end) || r.end < r.start || r.end > totalPages) {
+          throw new NodePdfError('VALIDATION_ERROR', `Range ${i + 1}: end must be >= start and <= ${totalPages}`);
+        }
+      }
+
+      // Check for overlap — sort by start, ensure each end < next start.
+      const sorted = input.ranges
+        .map((r, idx) => ({ idx, start: r.start, end: r.end }))
+        .sort((a, b) => a.start - b.start);
+      for (let i = 0; i < sorted.length - 1; i++) {
+        if (sorted[i]!.end >= sorted[i + 1]!.start) {
+          throw new NodePdfError('VALIDATION_ERROR', 'Page ranges must not overlap');
+        }
+      }
+
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const basename = input.filePath.split(/[\\/]/).pop()?.replace(/\.pdf$/i, '') ?? 'document';
+      const savedPaths: string[] = [];
+
+      for (let i = 0; i < input.ranges.length; i++) {
+        const { start, end } = input.ranges[i]!;
+        const pageIndices: number[] = [];
+        for (let p = start - 1; p <= end - 1; p++) pageIndices.push(p);
+
+        let partDoc: PDFDocument;
+        try {
+          partDoc = await PDFDocument.create();
+          const [copied] = await partDoc.copyPages(srcDoc, pageIndices);
+          partDoc.addPage(copied);
+        } catch (err) {
+          throw new NodePdfError('READ_FAILED', `Failed to create part ${i + 1}`, err);
+        }
+
+        let partBytes: Uint8Array;
+        try {
+          partBytes = await partDoc.save();
+        } catch (err) {
+          throw new NodePdfError('READ_FAILED', `Failed to serialize part ${i + 1}`, err);
+        }
+
+        const defaultName = `${basename}_part${i + 1}.pdf`;
+        const saveOpts = win
+          ? await dialog.showSaveDialog(win, {
+              title: `Save part ${i + 1} of ${input.ranges.length}`,
+              defaultPath: defaultName,
+              filters: [{ name: 'PDF', extensions: ['pdf'] }],
+            })
+          : await dialog.showSaveDialog({
+              title: `Save part ${i + 1} of ${input.ranges.length}`,
+              defaultPath: defaultName,
+              filters: [{ name: 'PDF', extensions: ['pdf'] }],
+            });
+
+        if (saveOpts.canceled || !saveOpts.filePath) {
+          throw new NodePdfError('READ_FAILED', `Save cancelled for part ${i + 1}`);
+        }
+
+        await safeWritePdf(saveOpts.filePath, partBytes, {
+          context: `split-part-${i + 1}`,
+        });
+        savedPaths.push(saveOpts.filePath);
+      }
+
+      return { savedPaths };
+    },
+  );
 }

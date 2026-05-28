@@ -15,7 +15,7 @@ import { useTabsStore } from '../stores/tabs.js';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import type { FormInfo } from '~shared/types/forms.js';
-import type { ProtectInput } from '~shared/types/ipc.js';
+import type { ProtectInput, SplitInput } from '~shared/types/ipc.js';
 import type {
   ExistingSignatureInfo,
   SignDigitalInput,
@@ -25,6 +25,7 @@ import { DigitalSignDialog } from './DigitalSignDialog.js';
 import { PasswordDialog } from './PasswordDialog.js';
 import { PrintDialog } from './PrintDialog.js';
 import { ProtectDialog } from './ProtectDialog.js';
+import { SplitDialog } from './SplitDialog.js';
 import { SaveFormDialog } from './SaveFormDialog.js';
 import { SignaturePanel } from './SignaturePanel.js';
 import { SignaturesMenu } from './SignaturesMenu.js';
@@ -269,6 +270,8 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
   const [printOpen, setPrintOpen] = useState(false);
   const [protectOpen, setProtectOpen] = useState(false);
   const [protecting, setProtecting] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [splitting, setSplitting] = useState(false);
   /** True once pdfjs has signalled the file is encrypted — used to decide
    * whether the protect dialog should ask for the current password and
    * whether to forward the password to PDF-mutating IPC calls. */
@@ -1431,6 +1434,27 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
     [activePage, filePath],
   );
 
+  const handleSplit = useCallback(
+    async (payload: { input: SplitInput; openAfterSave: boolean }) => {
+      setSplitting(true);
+      try {
+        const result = await ipc.pdf.split(payload.input);
+        if (payload.openAfterSave) {
+          const { openPdf } = useTabsStore.getState();
+          for (const p of result.savedPaths) {
+            openPdf({ filePath: p });
+          }
+        }
+        setSplitOpen(false);
+      } catch (err) {
+        console.error('[PdfView] split failed', err);
+      } finally {
+        setSplitting(false);
+      }
+    },
+    [],
+  );
+
   const handlePassword = useCallback(
     (callback: (password: string) => void, reason: number) => {
       // pdfjs uses reason === 2 for "incorrect password" retries.
@@ -1993,6 +2017,17 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
           >
             <LockIcon />
           </button>
+          <button
+            type="button"
+            className={`pdf-tool${splitOpen ? ' pdf-tool-active' : ''}`}
+            onClick={() => setSplitOpen(true)}
+            aria-label="Split PDF"
+            title="Split PDF"
+            aria-pressed={splitOpen}
+            disabled={!isReady}
+          >
+            <SplitIcon />
+          </button>
         </div>
       </div>
 
@@ -2271,6 +2306,18 @@ export function PdfView({ filePath }: PdfViewProps): JSX.Element {
           busy={protecting}
           onSubmit={handleProtect}
           onCancel={() => setProtectOpen(false)}
+        />
+      )}
+
+      {splitOpen && (
+        <SplitDialog
+          filePath={filePath}
+          totalPages={numPages}
+          isEncrypted={isEncrypted}
+          unlockedPassword={unlockedPassword ?? undefined}
+          busy={splitting}
+          onSubmit={handleSplit}
+          onCancel={() => setSplitOpen(false)}
         />
       )}
 
@@ -2748,6 +2795,16 @@ function LockIcon(): JSX.Element {
         strokeLinecap="round"
       />
       <circle cx="8" cy="10.5" r="0.9" fill="currentColor" />
+    </svg>
+  );
+}
+
+function SplitIcon(): JSX.Element {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="2" y="3" width="5" height="10" rx="1" stroke="currentColor" strokeWidth="1.2" />
+      <rect x="9" y="3" width="5" height="10" rx="1" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M7 8H9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
     </svg>
   );
 }
