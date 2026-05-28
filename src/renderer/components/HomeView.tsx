@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Document, Page } from 'react-pdf';
 
 import iconUrl from '../assets/icon.png';
@@ -20,8 +20,10 @@ export function HomeView(): JSX.Element {
   const starred = useTabsStore((s) => s.starred);
   const openPdf = useTabsStore((s) => s.openPdf);
   const toggleStarred = useTabsStore((s) => s.toggleStarred);
+  const removeRecent = useTabsStore((s) => s.removeRecent);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [section, setSection] = useState<HomeSection>('recent');
+  const [sidebarWidth, setSidebarWidth] = useState(220);
 
   const handleOpen = async (defaultPath?: string) => {
     const filePath = await ipc.pdf.open(defaultPath);
@@ -58,38 +60,61 @@ export function HomeView(): JSX.Element {
           Open File
         </button>
       </header>
-      <div className="home-body">
-        <aside className="home-sidebar" aria-label="Navigation">
-        <nav>
-          <ul className="home-nav">
-            <li>
-              <SidebarItem
-                icon={<IconClock />}
-                label="Recent"
-                active={section === 'recent'}
-                onClick={() => setSection('recent')}
-              />
-            </li>
-            <li>
-              <SidebarItem
-                icon={<IconStarOutline />}
-                label="Starred"
-                active={section === 'starred'}
-                onClick={() => setSection('starred')}
-              />
-            </li>
-            <li>
-              <SidebarItem
-                icon={<IconComputer />}
-                label="Your computer"
-                active={section === 'computer'}
-                onClick={() => setSection('computer')}
-              />
-            </li>
-          </ul>
-        </nav>
-        <UpdaterStatus />
-      </aside>
+      <div className="home-body" style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}>
+        <aside
+          className="home-sidebar"
+          aria-label="Navigation"
+        >
+          <nav>
+            <ul className="home-nav">
+              <li>
+                <SidebarItem
+                  icon={<IconClock />}
+                  label="Recent"
+                  active={section === 'recent'}
+                  onClick={() => setSection('recent')}
+                />
+              </li>
+              <li>
+                <SidebarItem
+                  icon={<IconStarOutline />}
+                  label="Starred"
+                  active={section === 'starred'}
+                  onClick={() => setSection('starred')}
+                />
+              </li>
+              <li>
+                <SidebarItem
+                  icon={<IconComputer />}
+                  label="Your computer"
+                  active={section === 'computer'}
+                  onClick={() => setSection('computer')}
+                />
+              </li>
+            </ul>
+          </nav>
+          <UpdaterStatus />
+        </aside>
+        <div
+          className="home-sidebar-resize"
+          role="separator"
+          aria-label="Resize sidebar"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startW = sidebarWidth;
+            const onMove = (ev: MouseEvent) => {
+              const delta = ev.clientX - startX;
+              setSidebarWidth(Math.max(160, Math.min(400, startW + delta)));
+            };
+            const onUp = () => {
+              window.removeEventListener('mousemove', onMove);
+              window.removeEventListener('mouseup', onUp);
+            };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+          }}
+        />
 
       <main className="home-main">
         {section === 'recent' && (
@@ -101,6 +126,7 @@ export function HomeView(): JSX.Element {
             onOpenRecent={openRecent}
             isStarred={isStarred}
             onToggleStar={toggleStarred}
+            onRemoveRecent={removeRecent}
           />
         )}
         {section === 'starred' && (
@@ -111,6 +137,7 @@ export function HomeView(): JSX.Element {
             onOpenRecent={openRecent}
             onToggleStar={toggleStarred}
             onGoToRecent={() => setSection('recent')}
+            onRemoveRecent={removeRecent}
           />
         )}
         {section === 'computer' && (
@@ -157,6 +184,7 @@ interface RecentSectionProps {
   onOpenRecent(recent: RecentDoc): void;
   isStarred(filePath: string): boolean;
   onToggleStar(filePath: string): void;
+  onRemoveRecent(filePath: string): void;
 }
 
 function RecentSection({
@@ -167,6 +195,7 @@ function RecentSection({
   onOpenRecent,
   isStarred,
   onToggleStar,
+  onRemoveRecent,
 }: RecentSectionProps): JSX.Element {
   return (
     <>
@@ -209,6 +238,7 @@ function RecentSection({
         emptyHint="Open a PDF to get started."
         isStarred={isStarred}
         onToggleStar={onToggleStar}
+        onRemoveRecent={onRemoveRecent}
       />
     </>
   );
@@ -223,6 +253,7 @@ interface StarredSectionProps {
   onOpenRecent(recent: RecentDoc): void;
   onToggleStar(filePath: string): void;
   onGoToRecent(): void;
+  onRemoveRecent(filePath: string): void;
 }
 
 function StarredSection({
@@ -232,6 +263,7 @@ function StarredSection({
   onOpenRecent,
   onToggleStar,
   onGoToRecent,
+  onRemoveRecent,
 }: StarredSectionProps): JSX.Element {
   if (starred.length === 0) {
     return (
@@ -264,6 +296,7 @@ function StarredSection({
       emptyHint="Your starred files will appear here."
       isStarred={() => true}
       onToggleStar={onToggleStar}
+      onRemoveRecent={onRemoveRecent}
     />
   );
 }
@@ -340,6 +373,7 @@ interface RecentsBlockProps {
   emptyHint: string;
   isStarred(filePath: string): boolean;
   onToggleStar(filePath: string): void;
+  onRemoveRecent(filePath: string): void;
 }
 
 function RecentsBlock({
@@ -352,6 +386,7 @@ function RecentsBlock({
   emptyHint,
   isStarred,
   onToggleStar,
+  onRemoveRecent,
 }: RecentsBlockProps): JSX.Element {
   return (
     <section className="home-recents-section" aria-label={title}>
@@ -370,6 +405,7 @@ function RecentsBlock({
           onOpen={onOpen}
           isStarred={isStarred}
           onToggleStar={onToggleStar}
+          onRemoveRecent={onRemoveRecent}
         />
       ) : (
         <RecentsGrid
@@ -377,6 +413,7 @@ function RecentsBlock({
           onOpen={onOpen}
           isStarred={isStarred}
           onToggleStar={onToggleStar}
+          onRemoveRecent={onRemoveRecent}
         />
       )}
     </section>
@@ -448,6 +485,7 @@ interface RecentsTableProps {
   onOpen(recent: RecentDoc): void;
   isStarred(filePath: string): boolean;
   onToggleStar(filePath: string): void;
+  onRemoveRecent(filePath: string): void;
 }
 
 function RecentsTable({
@@ -455,6 +493,7 @@ function RecentsTable({
   onOpen,
   isStarred,
   onToggleStar,
+  onRemoveRecent,
 }: RecentsTableProps): JSX.Element {
   return (
     <div className="home-recents-table-wrap">
@@ -474,6 +513,7 @@ function RecentsTable({
               starred={isStarred(r.filePath)}
               onOpen={() => onOpen(r)}
               onToggleStar={() => onToggleStar(r.filePath)}
+              onRemoveRecent={() => onRemoveRecent(r.filePath)}
             />
           ))}
         </tbody>
@@ -487,6 +527,7 @@ interface RecentsRowProps {
   starred: boolean;
   onOpen(): void;
   onToggleStar(): void;
+  onRemoveRecent(): void;
 }
 
 function RecentsRow({
@@ -494,21 +535,28 @@ function RecentsRow({
   starred,
   onOpen,
   onToggleStar,
+  onRemoveRecent,
 }: RecentsRowProps): JSX.Element {
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   return (
-    <tr
-      className="home-recents-row"
-      onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+    <>
+      <tr
+        className="home-recents-row"
+        onClick={onOpen}
+        onContextMenu={(e) => {
           e.preventDefault();
-          onOpen();
-        }
-      }}
-      role="button"
-      tabIndex={0}
-      title={recent.filePath}
-    >
+          setCtxMenu({ x: e.clientX, y: e.clientY });
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpen();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        title={recent.filePath}
+      >
       <td className="home-recents-cell-star">
         <button
           type="button"
@@ -535,6 +583,17 @@ function RecentsRow({
       </td>
       <td className="home-recents-opened">{formatOpened(recent.lastOpenedAt)}</td>
     </tr>
+    {ctxMenu && (
+      <ContextMenu
+        x={ctxMenu.x}
+        y={ctxMenu.y}
+        onClose={() => setCtxMenu(null)}
+        items={[
+          { label: 'Remove from recent', onClick: onRemoveRecent },
+        ]}
+      />
+    )}
+    </>
   );
 }
 
@@ -569,6 +628,7 @@ interface RecentsGridProps {
   onOpen(recent: RecentDoc): void;
   isStarred(filePath: string): boolean;
   onToggleStar(filePath: string): void;
+  onRemoveRecent(filePath: string): void;
 }
 
 function RecentsGrid({
@@ -576,6 +636,7 @@ function RecentsGrid({
   onOpen,
   isStarred,
   onToggleStar,
+  onRemoveRecent,
 }: RecentsGridProps): JSX.Element {
   return (
     <div className="home-recents-grid">
@@ -586,6 +647,7 @@ function RecentsGrid({
           starred={isStarred(r.filePath)}
           onOpen={() => onOpen(r)}
           onToggleStar={() => onToggleStar(r.filePath)}
+          onRemoveRecent={() => onRemoveRecent(r.filePath)}
         />
       ))}
     </div>
@@ -597,12 +659,22 @@ interface GridItemProps {
   starred: boolean;
   onOpen(): void;
   onToggleStar(): void;
+  onRemoveRecent(): void;
 }
 
-function GridItem({ recent, starred, onOpen, onToggleStar }: GridItemProps): JSX.Element {
+function GridItem({ recent, starred, onOpen, onToggleStar, onRemoveRecent }: GridItemProps): JSX.Element {
   const load = useRecentThumb(recent.filePath);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   return (
-    <div className="home-grid-item" title={recent.filePath}>
+    <>
+      <div
+        className="home-grid-item"
+        title={recent.filePath}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setCtxMenu({ x: e.clientX, y: e.clientY });
+        }}
+      >
       <button
         type="button"
         className={`home-grid-star${starred ? ' is-starred' : ''}`}
@@ -647,6 +719,77 @@ function GridItem({ recent, starred, onOpen, onToggleStar }: GridItemProps): JSX
         </div>
         <div className="home-grid-name">{recent.title}</div>
       </button>
+    </div>
+    {ctxMenu && (
+      <ContextMenu
+        x={ctxMenu.x}
+        y={ctxMenu.y}
+        onClose={() => setCtxMenu(null)}
+        items={[
+          { label: 'Remove from recent', onClick: onRemoveRecent },
+        ]}
+      />
+    )}
+    </>
+  );
+}
+
+/* --- Context menu ------------------------------------------------------- */
+
+interface MenuItem {
+  label: string;
+  onClick(): void;
+}
+
+function ContextMenu({
+  x,
+  y,
+  onClose,
+  items,
+}: {
+  x: number;
+  y: number;
+  onClose(): void;
+  items: MenuItem[];
+}): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    window.addEventListener('mousedown', onClick);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('mousedown', onClick);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="context-menu"
+      style={{ left: x, top: y }}
+      role="menu"
+    >
+      {items.map((item) => (
+        <button
+          key={item.label}
+          type="button"
+          className="context-menu-item"
+          role="menuitem"
+          onClick={() => {
+            item.onClick();
+            onClose();
+          }}
+        >
+          {item.label}
+        </button>
+      ))}
     </div>
   );
 }

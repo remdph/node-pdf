@@ -761,7 +761,7 @@ button.primary:disabled {
 .home-body {
   flex: 1;
   display: grid;
-  grid-template-columns: 232px 1fr;
+  grid-template-columns: var(--sidebar-width, 232px) 1fr;
   min-height: 0;
   min-width: 0;
 }
@@ -775,6 +775,22 @@ button.primary:disabled {
    * trailing `margin-top: auto` on `.updater-status`. */
   display: flex;
   flex-direction: column;
+  min-width: 0;
+}
+
+.home-sidebar-resize {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  border-right: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.home-sidebar-resize:hover,
+.home-sidebar-resize:active {
+  background: var(--accent);
+  border-right-color: var(--accent);
 }
 
 .home-nav {
