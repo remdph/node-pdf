@@ -392,8 +392,11 @@ export function registerPdfIpc(): void {
         let partDoc: PDFDocument;
         try {
           partDoc = await PDFDocument.create();
-          // copyPages adds the copied pages to partDoc automatically.
-          await partDoc.copyPages(srcDoc, pageIndices);
+          // copyPages returns the copied pages — addPage inserts each into partDoc.
+          const copiedPages = await partDoc.copyPages(srcDoc, pageIndices);
+          for (const page of copiedPages) {
+            partDoc.addPage(page);
+          }
         } catch (err) {
           throw new NodePdfError('READ_FAILED', `Failed to create part ${i + 1}`, err);
         }
